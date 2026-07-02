@@ -1,8 +1,17 @@
-.vercel
-.next/
-node_modules/
-# Override root gitignore: lib/ is our Next.js shared library, not Python dist
-!lib/
-*.tsbuildinfo
+# Python
 __pycache__/
 *.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Datos locales
+cenit.db
+*.db
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Deploy
+.vercel
