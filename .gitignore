@@ -1,0 +1,8 @@
+.vercel
+.next/
+node_modules/
+# Override root gitignore: lib/ is our Next.js shared library, not Python dist
+!lib/
+*.tsbuildinfo
+__pycache__/
+*.pyc
