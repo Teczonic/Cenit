@@ -9,6 +9,16 @@ import sys
 
 import streamlit as st
 
+# Puente secretos → entorno: Streamlit Cloud expone la config vía st.secrets,
+# no como variables de entorno. Copiamos CENIT_API_URL a os.environ para que
+# api_client (que usa os.getenv) funcione igual en local, Docker y Streamlit Cloud.
+try:
+    _api_url = st.secrets.get("CENIT_API_URL")
+    if _api_url:
+        os.environ["CENIT_API_URL"] = _api_url
+except Exception:
+    pass  # sin archivo de secretos (local/Docker): se usa la env var o el default
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ui.api_client import ApiError, CenitClient  # noqa: E402
