@@ -6,6 +6,7 @@ igual que los servicios TypeScript operaban sobre TareaRaw.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 ESTADOS: list[str] = ["No Iniciado", "En Proceso", "Pausado", "Completado"]
@@ -137,6 +138,68 @@ class AnalyticsService:
             {"mes": mes, "count": count}
             for mes, count in sorted(monthly.items())[-6:]
         ]
+
+
+class FlowService:
+    """Métricas de flujo derivadas del historial de transiciones de estado.
+
+    Opera sobre una lista de dicts {task_id, from_state, to_state, changed_at:datetime},
+    sin depender de la base de datos — testeable en aislamiento.
+    """
+
+    def metricas_por_tarea(self, transiciones: list[dict], ahora: datetime) -> dict[int, dict]:
+        grupos: dict[int, list[dict]] = {}
+        for t in transiciones:
+            grupos.setdefault(t["task_id"], []).append(t)
+
+        resultado: dict[int, dict] = {}
+        for task_id, trs in grupos.items():
+            trs = sorted(trs, key=lambda x: x["changed_at"])
+            creado = trs[0]["changed_at"]
+            entrada_proceso = next((x["changed_at"] for x in trs if x["to_state"] == "En Proceso"), None)
+            completado = None
+            for x in trs:
+                if x["to_state"] == "Completado":
+                    completado = x["changed_at"]
+
+            # Tiempo acumulado en cada estado (el último se extiende hasta 'ahora')
+            tiempo_estado: dict[str, float] = {}
+            for i, x in enumerate(trs):
+                fin = trs[i + 1]["changed_at"] if i + 1 < len(trs) else ahora
+                dur = max((fin - x["changed_at"]).total_seconds(), 0)
+                tiempo_estado[x["to_state"]] = tiempo_estado.get(x["to_state"], 0) + dur
+
+            activo = tiempo_estado.get("En Proceso", 0)
+            pausa = tiempo_estado.get("Pausado", 0)
+            flow_eff = round(activo / (activo + pausa) * 100, 1) if (activo + pausa) > 0 else None
+
+            estado_actual = trs[-1]["to_state"]
+            abierta = estado_actual != "Completado"
+
+            resultado[task_id] = {
+                "estado_actual": estado_actual,
+                "lead_time_days": round((completado - creado).total_seconds() / 86400, 1) if completado else None,
+                "cycle_time_days": round((completado - entrada_proceso).total_seconds() / 86400, 1) if (completado and entrada_proceso) else None,
+                "flow_efficiency": flow_eff,
+                "aging_days": round((ahora - trs[-1]["changed_at"]).total_seconds() / 86400, 1) if abierta else None,
+            }
+        return resultado
+
+    def resumen(self, transiciones: list[dict], ahora: datetime) -> dict:
+        por_tarea = self.metricas_por_tarea(transiciones, ahora)
+
+        def _prom(campo: str) -> Optional[float]:
+            xs = [m[campo] for m in por_tarea.values() if m[campo] is not None]
+            return round(sum(xs) / len(xs), 1) if xs else None
+
+        return {
+            "tareas": len(por_tarea),
+            "lead_time_avg": _prom("lead_time_days"),
+            "cycle_time_avg": _prom("cycle_time_days"),
+            "flow_efficiency_avg": _prom("flow_efficiency"),
+            "aging_avg": _prom("aging_days"),
+            "por_tarea": por_tarea,
+        }
 
 
 class FiltroService:

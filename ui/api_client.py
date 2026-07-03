@@ -95,3 +95,39 @@ class CenitClient:
 
     def analytics_lead_time(self) -> list[dict]:
         return self._request("GET", "/api/analytics/lead_time")
+
+    def analytics_flow(self) -> dict:
+        return self._request("GET", "/api/analytics/flow")
+
+    def task_transitions(self, task_id: int) -> list[dict]:
+        return self._request("GET", f"/api/tasks/{task_id}/transitions")
+
+    # ── OKRs ─────────────────────────────────────────────────────────
+
+    def okr_cycles(self) -> list[dict]:
+        return self._request("GET", "/api/okr/cycles")
+
+    def create_okr_cycle(self, nombre: str, fecha_inicio: str, fecha_fin: str) -> dict:
+        return self._request("POST", "/api/okr/cycles", json={
+            "nombre": nombre, "fecha_inicio": fecha_inicio, "fecha_fin": fecha_fin})
+
+    def okr_overview(self, cycle_id: int | None = None) -> dict:
+        params = {"cycle_id": cycle_id} if cycle_id else {}
+        return self._request("GET", "/api/okr/overview", params=params)
+
+    def create_objective(self, cycle_id: int, titulo: str, owner=None, entidad=None) -> dict:
+        return self._request("POST", "/api/okr/objectives", json={
+            "cycle_id": cycle_id, "titulo": titulo, "owner": owner, "entidad": entidad})
+
+    def create_key_result(self, objective_id: int, titulo: str, valor_inicial: float,
+                          valor_meta: float, valor_actual: float = 0, unidad=None) -> dict:
+        return self._request("POST", "/api/okr/key-results", json={
+            "objective_id": objective_id, "titulo": titulo, "valor_inicial": valor_inicial,
+            "valor_meta": valor_meta, "valor_actual": valor_actual, "unidad": unidad})
+
+    def patch_kr(self, kr_id: int, valor_actual: float) -> dict:
+        return self._request("PATCH", f"/api/okr/key-results/{kr_id}",
+                             json={"valor_actual": valor_actual})
+
+    def link_task_kr(self, task_id: int, kr_id: int) -> dict:
+        return self._request("POST", f"/api/tasks/{task_id}/key-results/{kr_id}")

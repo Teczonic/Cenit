@@ -150,6 +150,20 @@ def dialogo_tarea(tarea: Optional[dict] = None):
             except ApiError as e:
                 st.error(str(e))
 
+    if not es_nueva:
+        with st.expander("🕓 Historial de estados"):
+            try:
+                trans = get_client().task_transitions(t["id"])
+            except ApiError:
+                trans = []
+            if not trans:
+                st.caption("Sin transiciones registradas todavía.")
+            for tr in trans:
+                origen = tr.get("from_state") or "—"
+                cuando = _fmt_fecha(tr.get("changed_at"))
+                quien = tr.get("changed_by") or "sistema"
+                st.markdown(f'`{cuando}` · {origen} → **{tr["to_state"]}** · {quien}')
+
     if not es_nueva and st.session_state.get("user", {}).get("role") == "admin":
         if st.button("🗑️ Eliminar tarea", type="secondary"):
             try:

@@ -15,3 +15,7 @@ cenit.db
 
 # Deploy
 .vercel
+
+# Entorno local
+.env
+.vscode/

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, DateTime, Date, Text, ForeignKey, Float
 from sqlalchemy.sql import func
 from .database import Base
 
@@ -114,3 +114,57 @@ class Task(Base):
 
         # ── Risk Score 0-100 ──────────────────────────────────────────────────
         return round(probabilidad * impacto * (1 - cobertura) / 10, 1)
+
+
+class TaskStateTransition(Base):
+    """Historial de cambios de estado — cimiento del motor de flujo de Cenit.
+
+    Cada transición registrada desbloquea lead time real, cycle time, aging,
+    flow efficiency y las métricas DORA/Lean, sin recalcular desde columnas sueltas.
+    """
+    __tablename__ = "task_state_transitions"
+    id         = Column(Integer, primary_key=True, index=True)
+    task_id    = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    from_state = Column(String(30))                       # None en la transición inicial
+    to_state   = Column(String(30), nullable=False)
+    changed_by = Column(String(80))                       # username, consistente con tasks.created_by
+    changed_at = Column(DateTime(timezone=True), server_default=func.now())
+    reason     = Column(Text)
+
+
+# ── OKRs: capa de dirección (tareas → resultados) ──────────────────────────────
+
+class OkrCycle(Base):
+    __tablename__ = "okr_cycles"
+    id           = Column(Integer, primary_key=True, index=True)
+    nombre       = Column(String(40), nullable=False)     # ej: "Q3 2026"
+    fecha_inicio = Column(Date, nullable=False)
+    fecha_fin    = Column(Date, nullable=False)
+    estado       = Column(String(20), default="activo")   # activo | cerrado
+
+
+class Objective(Base):
+    __tablename__ = "objectives"
+    id       = Column(Integer, primary_key=True, index=True)
+    cycle_id = Column(Integer, ForeignKey("okr_cycles.id", ondelete="CASCADE"), nullable=False, index=True)
+    titulo   = Column(String(200), nullable=False)
+    owner    = Column(String(80))                          # username del responsable
+    entidad  = Column(String(50))
+
+
+class KeyResult(Base):
+    __tablename__ = "key_results"
+    id            = Column(Integer, primary_key=True, index=True)
+    objective_id  = Column(Integer, ForeignKey("objectives.id", ondelete="CASCADE"), nullable=False, index=True)
+    titulo        = Column(String(200), nullable=False)
+    valor_inicial = Column(Float, nullable=False, default=0)
+    valor_meta    = Column(Float, nullable=False)
+    valor_actual  = Column(Float, nullable=False, default=0)
+    unidad        = Column(String(20))
+
+
+class TaskKeyResult(Base):
+    """Vincula una tarea a un key result — base del alignment ratio."""
+    __tablename__ = "task_key_results"
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
+    kr_id   = Column(Integer, ForeignKey("key_results.id", ondelete="CASCADE"), primary_key=True)

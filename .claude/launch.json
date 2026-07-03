@@ -12,6 +12,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "uvicorn", "api.main:app", "--port", "8000"],
       "port": 8000
+    },
+    {
+      "name": "roadmap",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8790", "--directory", "C:/Users/daiss/Documents/GitHub/Estado_Caballero_Azul/proyect"],
+      "port": 8790
     }
   ]
 }

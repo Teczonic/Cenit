@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 
 class LoginRequest(BaseModel):
     username: str
@@ -48,6 +48,40 @@ class TaskUpdate(BaseModel):
 
 class StatusPatch(BaseModel):
     estado: str
+
+class TransitionOut(BaseModel):
+    id: int
+    task_id: int
+    from_state: Optional[str]
+    to_state: str
+    changed_by: Optional[str]
+    changed_at: Optional[datetime]
+    class Config:
+        from_attributes = True
+
+# ── OKRs ────────────────────────────────────────────────────────────────────
+
+class OkrCycleCreate(BaseModel):
+    nombre: str
+    fecha_inicio: date
+    fecha_fin: date
+
+class ObjectiveCreate(BaseModel):
+    cycle_id: int
+    titulo: str
+    owner: Optional[str] = None
+    entidad: Optional[str] = None
+
+class KeyResultCreate(BaseModel):
+    objective_id: int
+    titulo: str
+    valor_inicial: float = 0
+    valor_meta: float
+    valor_actual: float = 0
+    unidad: Optional[str] = None
+
+class KRValorPatch(BaseModel):
+    valor_actual: float
 
 class TaskOut(BaseModel):
     id: int

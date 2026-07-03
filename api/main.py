@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, status, Request # pyright: ignore[reportMissingImports]
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import Optional, List
@@ -91,8 +92,8 @@ def create_task(data: schemas.TaskCreate, request: Request, db: Session = Depend
 
 @app.put("/api/tasks/{task_id}", response_model=schemas.TaskOut)
 def update_task(task_id: int, data: schemas.TaskUpdate, request: Request, db: Session = Depends(get_db)):
-    verify_token(request)
-    task = crud.update_task(db, task_id, data)
+    payload = verify_token(request)
+    task = crud.update_task(db, task_id, data, changed_by=payload.get("username"))
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
     return task
@@ -109,11 +110,15 @@ def delete_task(task_id: int, request: Request, db: Session = Depends(get_db)):
 
 @app.patch("/api/tasks/{task_id}/status")
 def patch_status(task_id: int, body: schemas.StatusPatch, request: Request, db: Session = Depends(get_db)):
-    verify_token(request)
-    task = crud.patch_task_status(db, task_id, body.estado)
+    payload = verify_token(request)
+    task = crud.patch_task_status(db, task_id, body.estado, changed_by=payload.get("username"))
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
     return task
+
+@app.get("/api/tasks/{task_id}/transitions", response_model=List[schemas.TransitionOut])
+def task_transitions(task_id: int, db: Session = Depends(get_db)):
+    return crud.get_transitions(db, task_id)
 
 # ── Analytics ─────────────────────────────────────────────────────────────────────────
 
@@ -129,6 +134,49 @@ def analytics_throughput(db: Session = Depends(get_db)):
 def analytics_lead_time(db: Session = Depends(get_db)):
     return crud.get_lead_time_by_person(db)
 
+@app.get("/api/analytics/flow")
+def analytics_flow(db: Session = Depends(get_db)):
+    """Motor de flujo: lead time real, cycle time, flow efficiency y aging."""
+    return crud.get_flow_metrics(db)
+
+# ── OKRs (dirección) ────────────────────────────────────────────────────────
+
+@app.get("/api/okr/cycles")
+def okr_cycles(db: Session = Depends(get_db)):
+    return crud.list_okr_cycles(db)
+
+@app.post("/api/okr/cycles")
+def create_okr_cycle(data: schemas.OkrCycleCreate, request: Request, db: Session = Depends(get_db)):
+    verify_token(request)
+    return crud.create_okr_cycle(db, data)
+
+@app.get("/api/okr/overview")
+def okr_overview(cycle_id: Optional[int] = None, db: Session = Depends(get_db)):
+    return crud.get_okr_overview(db, cycle_id=cycle_id)
+
+@app.post("/api/okr/objectives")
+def create_objective(data: schemas.ObjectiveCreate, request: Request, db: Session = Depends(get_db)):
+    verify_token(request)
+    return crud.create_objective(db, data)
+
+@app.post("/api/okr/key-results")
+def create_key_result(data: schemas.KeyResultCreate, request: Request, db: Session = Depends(get_db)):
+    verify_token(request)
+    return crud.create_key_result(db, data)
+
+@app.patch("/api/okr/key-results/{kr_id}")
+def patch_kr(kr_id: int, body: schemas.KRValorPatch, request: Request, db: Session = Depends(get_db)):
+    verify_token(request)
+    kr = crud.patch_kr_valor(db, kr_id, body.valor_actual)
+    if not kr:
+        raise HTTPException(status_code=404, detail="Key result no encontrado")
+    return kr
+
+@app.post("/api/tasks/{task_id}/key-results/{kr_id}")
+def link_task_kr(task_id: int, kr_id: int, request: Request, db: Session = Depends(get_db)):
+    verify_token(request)
+    return crud.link_task_kr(db, task_id, kr_id)
+
 # ── Seed ──────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/seed")
@@ -139,6 +187,20 @@ def seed_db(db: Session = Depends(get_db)):
     crud.seed_initial_data(db)
     return {"message": "Datos iniciales creados correctamente"}
 
+@app.get("/api/health")
+def health(db: Session = Depends(get_db)):
+    """Chequeo de salud para monitoreo del piloto: ¿la API responde y la DB está arriba?"""
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "ok", "db": "up"}
+    except Exception as e:
+        return JSONResponse(status_code=503, content={"status": "degraded", "db": str(e)})
+
 @app.get("/")
 def root():
-    return {"status": "Cenit API running", "version": "1.0.0"}
+    return {
+        "status": "Cenit API running",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/api/health",
+    }

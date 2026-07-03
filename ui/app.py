@@ -12,7 +12,9 @@ import streamlit as st
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ui.api_client import ApiError, CenitClient  # noqa: E402
-from ui.views import analytics, eisenhower, equipo, kanban, mi_dia, riesgos  # noqa: E402
+from ui.views import (  # noqa: E402
+    analytics, cockpit, eisenhower, equipo, importar, kanban, mi_dia, okrs, riesgos,
+)
 
 st.set_page_config(page_title="Cenit", page_icon="🏔️", layout="wide")
 
@@ -55,14 +57,25 @@ def app():
                 st.session_state.pop(k, None)
             st.rerun()
 
-    paginas = st.navigation([
-        st.Page(mi_dia.render, title="Mi día", icon="🌅", url_path="mi-dia", default=True),
-        st.Page(kanban.render, title="Kanban", icon="📋", url_path="kanban"),
-        st.Page(eisenhower.render, title="Eisenhower", icon="🎯", url_path="eisenhower"),
-        st.Page(riesgos.render, title="Riesgos", icon="⚠️", url_path="riesgos"),
-        st.Page(analytics.render, title="Analytics", icon="📊", url_path="analytics"),
-        st.Page(equipo.render, title="Equipo", icon="👥", url_path="equipo"),
-    ])
+    paginas = st.navigation({
+        "Dirigir": [
+            st.Page(cockpit.render, title="Cockpit", icon="🧭", url_path="cockpit", default=True),
+            st.Page(mi_dia.render, title="Mi día", icon="🌅", url_path="mi-dia"),
+            st.Page(okrs.render, title="OKRs", icon="🎯", url_path="okrs"),
+        ],
+        "Operar": [
+            st.Page(kanban.render, title="Kanban", icon="📋", url_path="kanban"),
+            st.Page(eisenhower.render, title="Eisenhower", icon="🎯", url_path="eisenhower"),
+            st.Page(riesgos.render, title="Riesgos", icon="⚠️", url_path="riesgos"),
+        ],
+        "Analizar": [
+            st.Page(analytics.render, title="Analytics", icon="📊", url_path="analytics"),
+            st.Page(equipo.render, title="Equipo", icon="👥", url_path="equipo"),
+        ],
+        "Datos": [
+            st.Page(importar.render, title="Importar CSV", icon="📥", url_path="importar"),
+        ],
+    })
 
     try:
         paginas.run()

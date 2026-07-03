@@ -4,7 +4,17 @@ from datetime import datetime, timedelta
 from typing import Optional
 from . import models, schemas
 from .auth import hash_password
+from domain.services import FlowService
 import random
+
+
+def _log_transition(db: Session, task_id: int, from_state, to_state: str,
+                    changed_by: Optional[str] = None, changed_at: Optional[datetime] = None):
+    """Registra un cambio de estado. No hace commit — se une a la transacción del caller."""
+    db.add(models.TaskStateTransition(
+        task_id=task_id, from_state=from_state, to_state=to_state,
+        changed_by=changed_by, changed_at=changed_at or datetime.utcnow(),
+    ))
 
 # ── Users ──────────────────────────────────────────────────────────────────────
 
@@ -46,11 +56,14 @@ def create_task(db: Session, data: schemas.TaskCreate, created_by: str):
     if data.estado == "En Proceso" and not data.fecha_inicio:
         task.fecha_inicio = datetime.utcnow()
     db.add(task); db.commit(); db.refresh(task)
+    _log_transition(db, task.id, None, task.estado, changed_by=created_by)
+    db.commit()
     return task
 
-def update_task(db: Session, task_id: int, data: schemas.TaskUpdate):
+def update_task(db: Session, task_id: int, data: schemas.TaskUpdate, changed_by: Optional[str] = None):
     task = db.query(models.Task).filter(models.Task.id == task_id).first()
     if not task: return None
+    old_estado = task.estado
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     for k, v in update_data.items():
         setattr(task, k, v)
@@ -58,12 +71,15 @@ def update_task(db: Session, task_id: int, data: schemas.TaskUpdate):
         task.fecha_completado = datetime.utcnow()
         if not task.fecha_inicio:
             task.fecha_inicio = task.created_at
+    if data.estado and data.estado != old_estado:
+        _log_transition(db, task.id, old_estado, data.estado, changed_by=changed_by)
     db.commit(); db.refresh(task)
     return task
 
-def patch_task_status(db: Session, task_id: int, estado: str):
+def patch_task_status(db: Session, task_id: int, estado: str, changed_by: Optional[str] = None):
     task = db.query(models.Task).filter(models.Task.id == task_id).first()
     if not task: return None
+    old_estado = task.estado
     task.estado = estado
     if estado == "En Proceso" and not task.fecha_inicio:
         task.fecha_inicio = datetime.utcnow()
@@ -71,6 +87,8 @@ def patch_task_status(db: Session, task_id: int, estado: str):
         task.fecha_completado = datetime.utcnow()
         if not task.fecha_inicio:
             task.fecha_inicio = task.created_at
+    if estado != old_estado:
+        _log_transition(db, task.id, old_estado, estado, changed_by=changed_by)
     db.commit(); db.refresh(task)
     return task
 
@@ -144,7 +162,123 @@ def get_lead_time_by_person(db: Session):
         })
     return sorted(result, key=lambda x: -x["count"])
 
+# ── Flujo (task_state_transitions) ──────────────────────────────────────────────
+
+def get_transitions(db: Session, task_id: int):
+    return (db.query(models.TaskStateTransition)
+              .filter(models.TaskStateTransition.task_id == task_id)
+              .order_by(models.TaskStateTransition.changed_at)
+              .all())
+
+def get_flow_metrics(db: Session):
+    """Lead time real, cycle time, flow efficiency y aging derivados del historial."""
+    rows = db.query(models.TaskStateTransition).all()
+
+    def _naive(dt):
+        # Postgres devuelve tz-aware; el dominio compara contra un 'ahora' naive.
+        return dt.replace(tzinfo=None) if dt and dt.tzinfo else dt
+
+    transiciones = [
+        {"task_id": r.task_id, "from_state": r.from_state,
+         "to_state": r.to_state, "changed_at": _naive(r.changed_at)}
+        for r in rows
+    ]
+    return FlowService().resumen(transiciones, datetime.utcnow())
+
+
+# ── OKRs (dirección) ────────────────────────────────────────────────────────
+
+def _kr_dict(kr, svc) -> dict:
+    d = {
+        "id": kr.id, "objective_id": kr.objective_id, "titulo": kr.titulo,
+        "valor_inicial": kr.valor_inicial, "valor_meta": kr.valor_meta,
+        "valor_actual": kr.valor_actual, "unidad": kr.unidad,
+    }
+    d["progreso"] = svc.progreso_kr(d)
+    return d
+
+def create_okr_cycle(db: Session, data: schemas.OkrCycleCreate):
+    cycle = models.OkrCycle(nombre=data.nombre, fecha_inicio=data.fecha_inicio,
+                            fecha_fin=data.fecha_fin)
+    db.add(cycle); db.commit(); db.refresh(cycle)
+    return {"id": cycle.id, "nombre": cycle.nombre, "fecha_inicio": cycle.fecha_inicio,
+            "fecha_fin": cycle.fecha_fin, "estado": cycle.estado}
+
+def list_okr_cycles(db: Session):
+    return [{"id": c.id, "nombre": c.nombre, "fecha_inicio": c.fecha_inicio,
+             "fecha_fin": c.fecha_fin, "estado": c.estado}
+            for c in db.query(models.OkrCycle).order_by(models.OkrCycle.fecha_inicio.desc()).all()]
+
+def create_objective(db: Session, data: schemas.ObjectiveCreate):
+    obj = models.Objective(cycle_id=data.cycle_id, titulo=data.titulo,
+                           owner=data.owner, entidad=data.entidad)
+    db.add(obj); db.commit(); db.refresh(obj)
+    return {"id": obj.id, "cycle_id": obj.cycle_id, "titulo": obj.titulo,
+            "owner": obj.owner, "entidad": obj.entidad}
+
+def create_key_result(db: Session, data: schemas.KeyResultCreate):
+    kr = models.KeyResult(objective_id=data.objective_id, titulo=data.titulo,
+                          valor_inicial=data.valor_inicial, valor_meta=data.valor_meta,
+                          valor_actual=data.valor_actual, unidad=data.unidad)
+    db.add(kr); db.commit(); db.refresh(kr)
+    from domain.okrs import OkrService
+    return _kr_dict(kr, OkrService())
+
+def patch_kr_valor(db: Session, kr_id: int, valor_actual: float):
+    kr = db.query(models.KeyResult).filter(models.KeyResult.id == kr_id).first()
+    if not kr:
+        return None
+    kr.valor_actual = valor_actual
+    db.commit(); db.refresh(kr)
+    from domain.okrs import OkrService
+    return _kr_dict(kr, OkrService())
+
+def link_task_kr(db: Session, task_id: int, kr_id: int):
+    exists = db.query(models.TaskKeyResult).filter_by(task_id=task_id, kr_id=kr_id).first()
+    if not exists:
+        db.add(models.TaskKeyResult(task_id=task_id, kr_id=kr_id)); db.commit()
+    return {"task_id": task_id, "kr_id": kr_id}
+
+def get_okr_overview(db: Session, cycle_id: Optional[int] = None):
+    from domain.okrs import OkrService
+    svc = OkrService()
+    q = db.query(models.Objective)
+    if cycle_id:
+        q = q.filter(models.Objective.cycle_id == cycle_id)
+    objectives = []
+    for o in q.all():
+        krs = [_kr_dict(k, svc) for k in
+               db.query(models.KeyResult).filter(models.KeyResult.objective_id == o.id).all()]
+        objectives.append({
+            "id": o.id, "cycle_id": o.cycle_id, "titulo": o.titulo,
+            "owner": o.owner, "entidad": o.entidad,
+            "progreso": svc.progreso_objective(krs), "key_results": krs,
+        })
+    tareas = [{"id": t.id, "estado": t.estado} for t in db.query(models.Task).all()]
+    vinculadas = {l.task_id for l in db.query(models.TaskKeyResult).all()}
+    return {
+        "objectives": objectives,
+        "alignment_ratio": svc.alignment_ratio(tareas, vinculadas),
+    }
+
+
 # ── Seed ──────────────────────────────────────────────────────────────────────
+
+def _backfill_transitions(db: Session, task: "models.Task"):
+    """Reconstruye un historial plausible para una tarea sembrada, así el
+    cockpit y /api/analytics/flow muestran datos históricos en las demos."""
+    created = task.fecha_inicio or task.created_at or datetime.utcnow()
+    _log_transition(db, task.id, None, "No Iniciado", changed_by="fidel", changed_at=created)
+    if task.fecha_inicio and task.estado in ("En Proceso", "Pausado", "Completado"):
+        _log_transition(db, task.id, "No Iniciado", "En Proceso",
+                        changed_by="fidel", changed_at=task.fecha_inicio)
+    if task.estado == "Pausado":
+        _log_transition(db, task.id, "En Proceso", "Pausado",
+                        changed_by="fidel", changed_at=task.fecha_inicio or created)
+    if task.fecha_completado:
+        _log_transition(db, task.id, "En Proceso", "Completado",
+                        changed_by="fidel", changed_at=task.fecha_completado)
+
 
 def seed_initial_data(db: Session):
     team = [
@@ -217,4 +351,38 @@ def seed_initial_data(db: Session):
                         fecha_completado=fc,created_by="fidel")
         db.add(t)
 
+    db.commit()
+
+    # Historial de transiciones para que el cockpit muestre datos desde el arranque
+    for t in db.query(models.Task).all():
+        _backfill_transitions(db, t)
+    db.commit()
+
+    # OKRs de ejemplo (capa de dirección) para que la vista no arranque vacía
+    cycle = models.OkrCycle(nombre="Q3 2026", fecha_inicio=now.date(),
+                            fecha_fin=(now + timedelta(days=90)).date(), estado="activo")
+    db.add(cycle); db.commit(); db.refresh(cycle)
+
+    obj1 = models.Objective(cycle_id=cycle.id, entidad="Xertify", owner="Fidel",
+                            titulo="Acelerar la entrega a clientes sin perder calidad")
+    obj2 = models.Objective(cycle_id=cycle.id, entidad="Xertiflow", owner="Lorena",
+                            titulo="Estabilizar la operación del equipo")
+    db.add_all([obj1, obj2]); db.commit(); db.refresh(obj1); db.refresh(obj2)
+
+    krs = [
+        models.KeyResult(objective_id=obj1.id, titulo="Lead time promedio bajo 5 días",
+                         valor_inicial=8, valor_meta=5, valor_actual=7, unidad="días"),
+        models.KeyResult(objective_id=obj1.id, titulo="Tareas vencidas en cero",
+                         valor_inicial=5, valor_meta=0, valor_actual=2, unidad="tareas"),
+        models.KeyResult(objective_id=obj2.id, titulo="Flow efficiency por encima de 85%",
+                         valor_inicial=70, valor_meta=85, valor_actual=80, unidad="%"),
+    ]
+    db.add_all(krs); db.commit()
+    for kr in krs:
+        db.refresh(kr)
+
+    # Vincular algunas tareas abiertas a los KRs (base del alignment ratio)
+    abiertas = db.query(models.Task).filter(models.Task.estado != "Completado").limit(6).all()
+    for i, t in enumerate(abiertas):
+        db.add(models.TaskKeyResult(task_id=t.id, kr_id=krs[i % len(krs)].id))
     db.commit()
