@@ -80,6 +80,11 @@ class Tarea:
     comentarios: Optional[str] = None
     risk_score: float = 0
 
+    def __post_init__(self) -> None:
+        # La API puede hidratar risk_score=None; el original TS hacía `?? 0`
+        if self.risk_score is None:
+            self.risk_score = 0
+
     def mover_estado(self, nuevo_estado: str) -> None:
         self.estado = nuevo_estado
 

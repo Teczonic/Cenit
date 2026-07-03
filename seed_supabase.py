@@ -14,14 +14,15 @@ from sqlalchemy.sql import func
 import bcrypt
 
 # ── Supabase connection ────────────────────────────────────────────────────────
-# Try 'postgres' user first (Supabase default superuser).
-# If you created a custom 'xerti' role in Supabase SQL editor, use that instead.
-SUPABASE_URLS = [
-    "postgresql://postgres:xerti2026@db.liwpsnbpghontykngznn.supabase.co:5432/postgres",
-    "postgresql://xerti:xerti2026@db.liwpsnbpghontykngznn.supabase.co:5432/postgres",
-    "postgresql://postgres:xerti2026@db.liwpsnbpghontykngznn.supabase.co:5432/cenit",
-    "postgresql://xerti:xerti2026@db.liwpsnbpghontykngznn.supabase.co:5432/cenit",
-]
+# La URL se lee de la variable de entorno DATABASE_URL — nunca la hardcodees aquí.
+#   PowerShell:  $env:DATABASE_URL = "postgresql://usuario:password@host:5432/postgres"
+#   bash:        export DATABASE_URL="postgresql://usuario:password@host:5432/postgres"
+import os
+
+_url = os.environ.get("DATABASE_URL")
+if not _url:
+    sys.exit("Falta la variable de entorno DATABASE_URL (connection string de Supabase)")
+SUPABASE_URLS = [_url]
 
 Base = declarative_base()
 

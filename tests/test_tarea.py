@@ -52,3 +52,9 @@ class TestTarea:
         t = make_tarea(risk_score=50)
         rs = t.calcular_riesgo()
         assert rs.calcular() > 0
+
+    def test_risk_score_none_se_coerciona_a_cero(self):
+        # La API puede devolver risk_score=None; el original TS hacía `?? 0`
+        t = make_tarea(risk_score=None)
+        assert t.risk_score == 0
+        assert t.calcular_riesgo().calcular() == 0
