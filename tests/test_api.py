@@ -198,3 +198,51 @@ class TestOkr:
         res = client.post(f'/api/tasks/{nueva["id"]}/key-results/{kr["id"]}', headers=auth(token))
         assert res.status_code == 200
         assert res.json()["kr_id"] == kr["id"]
+
+
+class TestKpis:
+    def test_overview_trae_kpis_sembrados_con_semaforo(self, client):
+        res = client.get("/api/kpis/overview")
+        assert res.status_code == 200
+        body = res.json()
+        assert len(body["kpis"]) >= 4
+        assert set(body["resumen"]) == {"verde", "ambar", "rojo", "sin_datos"}
+        k = body["kpis"][0]
+        assert k["estado"] in ("verde", "ambar", "rojo", "sin_datos")
+        assert "historial" in k
+
+    def test_crear_kpi_requiere_token(self, client):
+        res = client.post("/api/kpis", json={"clave": "x", "nombre": "X", "direccion": "up"})
+        assert res.status_code == 401
+
+    def test_direccion_invalida_da_400(self, client, token):
+        res = client.post("/api/kpis",
+                          json={"clave": "bad", "nombre": "Bad", "direccion": "lateral"},
+                          headers=auth(token))
+        assert res.status_code == 400
+
+    def test_flujo_completo_kpi_medicion_y_semaforo(self, client, token):
+        kpi = client.post("/api/kpis", json={
+            "clave": "cfr_test", "nombre": "Change failure rate", "direccion": "down",
+            "meta": 15, "umbral_alerta": 30, "unidad": "%",
+        }, headers=auth(token)).json()
+
+        # Valor bajo la meta → verde
+        m1 = client.post(f'/api/kpis/{kpi["id"]}/measurements',
+                         json={"periodo_inicio": "2026-06-01", "periodo_fin": "2026-06-07", "valor": 10},
+                         headers=auth(token)).json()
+        assert m1["estado"] == "verde"
+
+        # Valor sobre el umbral → rojo
+        m2 = client.post(f'/api/kpis/{kpi["id"]}/measurements',
+                         json={"periodo_inicio": "2026-06-08", "periodo_fin": "2026-06-14", "valor": 35},
+                         headers=auth(token)).json()
+        assert m2["estado"] == "rojo"
+
+        # El overview refleja el último valor y la tendencia al alza
+        ov = client.get("/api/kpis/overview").json()
+        cfr = next(k for k in ov["kpis"] if k["clave"] == "cfr_test")
+        assert cfr["valor_actual"] == 35
+        assert cfr["estado"] == "rojo"
+        assert cfr["tendencia"] == "sube"
+        assert len(cfr["historial"]) == 2

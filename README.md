@@ -77,6 +77,8 @@ Guía paso a paso en [DEPLOY.md](DEPLOY.md). Resumen:
 - **Mi día** — tus tareas agrupadas: vencidas, para hoy, próximas, en curso.
 - **OKRs** — dirección del trimestre: objetivos, key results con progreso calculado
   y alineación (% de tareas abiertas vinculadas a un resultado).
+- **KPIs** — motor de métricas: cada indicador con meta, umbral y semáforo
+  verde/ámbar/rojo, más tendencia e historial de mediciones.
 - **Kanban** — 4 columnas por estado, mover tareas entre estados.
 - **Eisenhower** — matriz 2×2 importante/urgente (excluye completadas).
 - **Riesgos** — top 30 por `risk_score` (probabilidad × impacto × (1 − cobertura)).
@@ -101,3 +103,13 @@ recorrida entre valor inicial y meta, sirve para metas ascendentes y descendente
 el de cada objetivo (promedio de sus KRs) y el *alignment ratio* (% de tareas
 abiertas conectadas a un KR). Expuesto en `GET /api/okr/overview` y consumido por el
 cockpit — conecta el trabajo diario con el resultado del trimestre.
+
+## Motor de métricas (KPIs)
+
+`metric_definitions` (catálogo con meta/umbral/dirección) + `metric_snapshots`
+(serie temporal inmutable, append-only). `domain/metrics.py` evalúa el semáforo
+—`up` (más es mejor), `down` (menos es mejor), `band` (rango objetivo)— y la
+tendencia entre snapshots. Expuesto en `GET /api/kpis/overview`. La regla de diseño
+(ver `docs/arquitectura`): **una métrica es un dato, no un módulo** — DORA, SPACE y
+los KRs cuantitativos se montarán como filas de este motor, sin duplicar lógica de
+semáforo, snapshot ni UI.

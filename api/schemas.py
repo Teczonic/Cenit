@@ -83,6 +83,26 @@ class KeyResultCreate(BaseModel):
 class KRValorPatch(BaseModel):
     valor_actual: float
 
+# ── KPIs / Motor de métricas ──────────────────────────────────────────────────
+
+class MetricDefinitionCreate(BaseModel):
+    clave: str
+    nombre: str
+    direccion: str                      # up | down | band
+    fuente: str = "manual"
+    entidad: Optional[str] = None
+    meta: Optional[float] = None
+    umbral_alerta: Optional[float] = None
+    banda_min: Optional[float] = None
+    banda_max: Optional[float] = None
+    unidad: Optional[str] = None
+    owner: Optional[str] = None
+
+class MeasurementCreate(BaseModel):
+    periodo_inicio: date
+    periodo_fin: date
+    valor: float
+
 class TaskOut(BaseModel):
     id: int
     entidad: str

@@ -177,6 +177,27 @@ def link_task_kr(task_id: int, kr_id: int, request: Request, db: Session = Depen
     verify_token(request)
     return crud.link_task_kr(db, task_id, kr_id)
 
+# ── KPIs / Motor de métricas ──────────────────────────────────────────────────
+
+@app.get("/api/kpis/overview")
+def kpi_overview(entidad: Optional[str] = None, db: Session = Depends(get_db)):
+    return crud.get_kpi_overview(db, entidad=entidad)
+
+@app.post("/api/kpis")
+def create_kpi(data: schemas.MetricDefinitionCreate, request: Request, db: Session = Depends(get_db)):
+    verify_token(request)
+    if data.direccion not in ("up", "down", "band"):
+        raise HTTPException(status_code=400, detail="dirección debe ser up, down o band")
+    return crud.create_metric_definition(db, data)
+
+@app.post("/api/kpis/{metric_id}/measurements")
+def add_measurement(metric_id: int, data: schemas.MeasurementCreate, request: Request, db: Session = Depends(get_db)):
+    verify_token(request)
+    res = crud.record_measurement(db, metric_id, data)
+    if not res:
+        raise HTTPException(status_code=404, detail="KPI no encontrado")
+    return res
+
 # ── Seed ──────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/seed")

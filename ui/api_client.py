@@ -131,3 +131,17 @@ class CenitClient:
 
     def link_task_kr(self, task_id: int, kr_id: int) -> dict:
         return self._request("POST", f"/api/tasks/{task_id}/key-results/{kr_id}")
+
+    # ── KPIs ─────────────────────────────────────────────────────────
+
+    def kpi_overview(self, entidad: str | None = None) -> dict:
+        params = {"entidad": entidad} if entidad else {}
+        return self._request("GET", "/api/kpis/overview", params=params)
+
+    def create_kpi(self, data: dict) -> dict:
+        return self._request("POST", "/api/kpis", json=data)
+
+    def add_measurement(self, metric_id: int, periodo_inicio: str,
+                        periodo_fin: str, valor: float) -> dict:
+        return self._request("POST", f"/api/kpis/{metric_id}/measurements", json={
+            "periodo_inicio": periodo_inicio, "periodo_fin": periodo_fin, "valor": valor})

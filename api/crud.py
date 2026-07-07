@@ -262,6 +262,62 @@ def get_okr_overview(db: Session, cycle_id: Optional[int] = None):
     }
 
 
+# ── KPIs / Motor de métricas ──────────────────────────────────────────────────
+
+def _def_dict(d: "models.MetricDefinition") -> dict:
+    return {
+        "id": d.id, "clave": d.clave, "nombre": d.nombre, "fuente": d.fuente,
+        "entidad": d.entidad, "direccion": d.direccion, "meta": d.meta,
+        "umbral_alerta": d.umbral_alerta, "banda_min": d.banda_min,
+        "banda_max": d.banda_max, "unidad": d.unidad, "owner": d.owner, "activa": d.activa,
+    }
+
+def create_metric_definition(db: Session, data: schemas.MetricDefinitionCreate):
+    m = models.MetricDefinition(**data.model_dump())
+    db.add(m); db.commit(); db.refresh(m)
+    return _def_dict(m)
+
+def record_measurement(db: Session, metric_id: int, data: schemas.MeasurementCreate):
+    from domain.metrics import evaluar_estado
+    m = db.query(models.MetricDefinition).filter(models.MetricDefinition.id == metric_id).first()
+    if not m:
+        return None
+    estado = evaluar_estado(_def_dict(m), data.valor)
+    existente = db.query(models.MetricSnapshot).filter_by(
+        metric_id=metric_id, periodo_inicio=data.periodo_inicio, periodo_fin=data.periodo_fin
+    ).first()
+    if existente:
+        # Re-medición del mismo periodo: actualiza valor/estado (no duplica la serie)
+        existente.valor = data.valor
+        existente.estado = estado
+    else:
+        db.add(models.MetricSnapshot(
+            metric_id=metric_id, periodo_inicio=data.periodo_inicio,
+            periodo_fin=data.periodo_fin, valor=data.valor, estado=estado,
+        ))
+    db.commit()
+    return {"metric_id": metric_id, "valor": data.valor, "estado": estado}
+
+def _snapshots(db: Session, metric_id: int) -> list[dict]:
+    rows = (db.query(models.MetricSnapshot)
+              .filter(models.MetricSnapshot.metric_id == metric_id)
+              .order_by(models.MetricSnapshot.periodo_inicio).all())
+    return [{"periodo_inicio": r.periodo_inicio, "periodo_fin": r.periodo_fin,
+             "valor": r.valor, "estado": r.estado} for r in rows]
+
+def get_kpi_overview(db: Session, entidad: Optional[str] = None):
+    from domain.metrics import MetricsEngine
+    engine = MetricsEngine()
+    q = db.query(models.MetricDefinition).filter(models.MetricDefinition.activa.is_(True))
+    if entidad:
+        q = q.filter(models.MetricDefinition.entidad == entidad)
+    kpis = [engine.resumir(_def_dict(m), _snapshots(db, m.id)) for m in q.all()]
+    resumen = {"verde": 0, "ambar": 0, "rojo": 0, "sin_datos": 0}
+    for k in kpis:
+        resumen[k["estado"]] = resumen.get(k["estado"], 0) + 1
+    return {"kpis": kpis, "resumen": resumen}
+
+
 # ── Seed ──────────────────────────────────────────────────────────────────────
 
 def _backfill_transitions(db: Session, task: "models.Task"):
@@ -385,4 +441,40 @@ def seed_initial_data(db: Session):
     abiertas = db.query(models.Task).filter(models.Task.estado != "Completado").limit(6).all()
     for i, t in enumerate(abiertas):
         db.add(models.TaskKeyResult(task_id=t.id, kr_id=krs[i % len(krs)].id))
+    db.commit()
+
+    # ── KPIs de ejemplo, con el valor actual derivado de los motores reales ──
+    from domain.metrics import evaluar_estado
+    flow = get_flow_metrics(db)
+    okr = get_okr_overview(db)
+    lead_actual = round(flow.get("lead_time_avg") or 8, 1)
+    eff_actual = round(flow.get("flow_efficiency_avg") or 80, 1)
+    align_actual = round(okr.get("alignment_ratio") or 20, 1)
+
+    kpi_specs = [
+        {"clave": "lead_time_avg", "nombre": "Lead time promedio", "direccion": "down",
+         "meta": 5, "umbral_alerta": 10, "unidad": "días", "fuente": "flow",
+         "owner": "Fidel", "serie": [9.5, 8.4, lead_actual]},
+        {"clave": "flow_efficiency", "nombre": "Flow efficiency", "direccion": "up",
+         "meta": 85, "umbral_alerta": 60, "unidad": "%", "fuente": "flow",
+         "owner": "Fidel", "serie": [72, 76, eff_actual]},
+        {"clave": "okr_alignment", "nombre": "Alineación OKR", "direccion": "up",
+         "meta": 60, "umbral_alerta": 30, "unidad": "%", "fuente": "okr",
+         "owner": "Fidel", "serie": [10, 15, align_actual]},
+        {"clave": "wip_por_persona", "nombre": "WIP por persona", "direccion": "band",
+         "banda_min": 1, "banda_max": 3, "unidad": "tareas", "fuente": "flow",
+         "owner": "Fidel", "serie": [4, 3, 2]},
+    ]
+    for spec in kpi_specs:
+        serie = spec.pop("serie")
+        m = models.MetricDefinition(**spec)
+        db.add(m); db.commit(); db.refresh(m)
+        defd = _def_dict(m)
+        n = len(serie)
+        for i, val in enumerate(serie):
+            fin = now.date() - timedelta(weeks=(n - 1 - i))
+            db.add(models.MetricSnapshot(
+                metric_id=m.id, periodo_inicio=fin - timedelta(days=6), periodo_fin=fin,
+                valor=val, estado=evaluar_estado(defd, val),
+            ))
     db.commit()

@@ -1,4 +1,7 @@
-from sqlalchemy import Column, Integer, String, DateTime, Date, Text, ForeignKey, Float
+from sqlalchemy import (
+    Column, Integer, String, DateTime, Date, Text, ForeignKey, Float,
+    Boolean, UniqueConstraint,
+)
 from sqlalchemy.sql import func
 from .database import Base
 
@@ -168,3 +171,38 @@ class TaskKeyResult(Base):
     __tablename__ = "task_key_results"
     task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
     kr_id   = Column(Integer, ForeignKey("key_results.id", ondelete="CASCADE"), primary_key=True)
+
+
+# ── Motor de métricas / KPIs ───────────────────────────────────────────────────
+
+class MetricDefinition(Base):
+    """Catálogo: qué KPI existe y cómo se evalúa su semáforo."""
+    __tablename__ = "metric_definitions"
+    id            = Column(Integer, primary_key=True, index=True)
+    clave         = Column(String(60), unique=True, nullable=False)  # 'lead_time_p85'
+    nombre        = Column(String(120), nullable=False)
+    fuente        = Column(String(40), nullable=False, default="manual")  # manual | flow | okr
+    entidad       = Column(String(50))
+    direccion     = Column(String(10), nullable=False)   # up | down | band
+    meta          = Column(Float)
+    umbral_alerta = Column(Float)
+    banda_min     = Column(Float)
+    banda_max     = Column(Float)
+    unidad        = Column(String(20))
+    owner         = Column(String(80))
+    activa        = Column(Boolean, nullable=False, default=True)
+
+
+class MetricSnapshot(Base):
+    """Serie temporal inmutable: el valor de un KPI en un periodo. Append-only."""
+    __tablename__ = "metric_snapshots"
+    id             = Column(Integer, primary_key=True, index=True)
+    metric_id      = Column(Integer, ForeignKey("metric_definitions.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    periodo_inicio = Column(Date, nullable=False)
+    periodo_fin    = Column(Date, nullable=False)
+    valor          = Column(Float, nullable=False)
+    estado         = Column(String(10), nullable=False)  # verde | ambar | rojo | sin_datos
+    calculado_en   = Column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (UniqueConstraint("metric_id", "periodo_inicio", "periodo_fin",
+                                       name="uq_metric_periodo"),)
