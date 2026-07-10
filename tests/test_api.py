@@ -222,6 +222,101 @@ class TestWipLimits:
         assert res.status_code == 200
 
 
+class TestSprints:
+    def test_seed_trae_sprint_activo_con_detalle(self, client):
+        sprints = client.get("/api/sprints", params={"estado": "activo"}).json()
+        assert len(sprints) >= 1
+        detalle = client.get(f'/api/sprints/{sprints[0]["id"]}').json()
+        assert detalle["velocity"]["puntos_comprometidos"] > 0
+        assert "burndown" in detalle
+
+    def test_crear_sprint_requiere_token(self, client):
+        res = client.post("/api/sprints", json={
+            "nombre": "X", "entidad": "Xertify",
+            "fecha_inicio": "2026-08-01", "fecha_fin": "2026-08-14"})
+        assert res.status_code == 401
+
+    def test_fechas_invalidas_dan_400(self, client, token):
+        res = client.post("/api/sprints", json={
+            "nombre": "Fechas mal", "entidad": "Xertify",
+            "fecha_inicio": "2026-08-14", "fecha_fin": "2026-08-01"}, headers=auth(token))
+        assert res.status_code == 400
+
+    def test_story_points_no_fibonacci_da_400(self, client, token):
+        res = client.post("/api/tasks", json={
+            "entidad": "Xertify", "descripcion": "Puntos raros", "story_points": 4,
+        }, headers=auth(token))
+        assert res.status_code == 400
+
+    def test_solo_un_sprint_activo_por_entidad(self, client, token):
+        nuevo = client.post("/api/sprints", json={
+            "nombre": "Sprint doble", "entidad": "Xertify",
+            "fecha_inicio": "2026-08-01", "fecha_fin": "2026-08-14"},
+            headers=auth(token)).json()
+        res = client.patch(f'/api/sprints/{nuevo["id"]}', json={"estado": "activo"},
+                           headers=auth(token))
+        assert res.status_code == 409  # ya hay un sprint activo en Xertify (seed)
+
+    def test_comprometer_tarea_sin_puntos_da_400(self, client, token):
+        sprint = client.post("/api/sprints", json={
+            "nombre": "Sprint puntos", "entidad": "Xertiflow",
+            "fecha_inicio": "2026-08-01", "fecha_fin": "2026-08-14"},
+            headers=auth(token)).json()
+        tarea = client.post("/api/tasks", json={
+            "entidad": "Xertiflow", "descripcion": "Sin estimar"}, headers=auth(token)).json()
+        res = client.post(f'/api/sprints/{sprint["id"]}/tasks',
+                          json={"task_ids": [tarea["id"]]}, headers=auth(token))
+        assert res.status_code == 400
+        assert tarea["id"] in res.json()["detail"]["sin_puntos"]
+
+    def test_ciclo_completo_comprometer_activar_cerrar(self, client, token):
+        sprint = client.post("/api/sprints", json={
+            "nombre": "Sprint ciclo", "entidad": "Xertiflow",
+            "fecha_inicio": "2026-06-01", "fecha_fin": "2026-06-12"},
+            headers=auth(token)).json()
+
+        hecha = client.post("/api/tasks", json={
+            "entidad": "Xertiflow", "descripcion": "Se completa", "story_points": 5,
+            "estado": "En Proceso"}, headers=auth(token)).json()
+        pendiente = client.post("/api/tasks", json={
+            "entidad": "Xertiflow", "descripcion": "Queda pendiente", "story_points": 3,
+        }, headers=auth(token)).json()
+
+        res = client.post(f'/api/sprints/{sprint["id"]}/tasks',
+                          json={"task_ids": [hecha["id"], pendiente["id"]]}, headers=auth(token))
+        assert res.status_code == 200
+        assert res.json()["committed"] is True  # en planning comprometen
+        assert res.json()["puntos"] == 8
+
+        client.patch(f'/api/sprints/{sprint["id"]}', json={"estado": "activo"}, headers=auth(token))
+        client.patch(f'/api/tasks/{hecha["id"]}/status',
+                     json={"estado": "Completado"}, headers=auth(token))
+
+        cierre = client.post(f'/api/sprints/{sprint["id"]}/close', headers=auth(token)).json()
+        # fecha_fin del sprint quedó en el pasado; la tarea se completó hoy →
+        # fuera de ventana. Solo valida la estructura del reporte:
+        assert cierre["puntos_comprometidos"] == 8
+        assert "carryover_sugerido" in cierre
+        assert "say_do_ratio" in cierre
+
+        detalle = client.get(f'/api/sprints/{sprint["id"]}').json()
+        assert detalle["estado"] == "cerrado"
+
+        # El histórico de velocity ya lo incluye
+        hist = client.get("/api/analytics/velocity", params={"entidad": "Xertiflow"}).json()
+        assert hist["sprints"] >= 1
+
+    def test_cerrar_requiere_creador_o_admin(self, client, token):
+        sprint = client.post("/api/sprints", json={
+            "nombre": "Sprint permisos", "entidad": "Xertiflow",
+            "fecha_inicio": "2026-09-01", "fecha_fin": "2026-09-12"},
+            headers=auth(token)).json()
+        tk_member = client.post("/api/auth/login",
+                                json={"username": "moshe", "password": "Moshe21"}).json()["token"]
+        res = client.post(f'/api/sprints/{sprint["id"]}/close', headers=auth(tk_member))
+        assert res.status_code == 403
+
+
 class TestOkr:
     def test_overview_trae_objetivos_sembrados(self, client):
         res = client.get("/api/okr/overview")

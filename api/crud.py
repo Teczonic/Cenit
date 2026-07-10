@@ -5,6 +5,7 @@ from typing import Optional
 from . import models, schemas
 from .auth import hash_password
 from domain.services import FlowService, WipService
+from domain.sprints import SprintService
 import random
 
 
@@ -257,6 +258,152 @@ def evaluar_wip_movimiento(db: Session, estado_destino: str, responsable: Option
                                            estado_destino, responsable=responsable)
 
 
+# ── Sprints ligeros (Linear Cycles) ──────────────────────────────────────────
+
+def _sprint_dict(s: "models.Sprint") -> dict:
+    return {"id": s.id, "nombre": s.nombre, "objetivo": s.objetivo, "entidad": s.entidad,
+            "fecha_inicio": s.fecha_inicio, "fecha_fin": s.fecha_fin,
+            "estado": s.estado, "created_by": s.created_by}
+
+def _sprint_task_dict(st: "models.SprintTask") -> dict:
+    return {"id": st.id, "sprint_id": st.sprint_id, "task_id": st.task_id,
+            "committed": st.committed, "points_snapshot": st.points_snapshot,
+            "removed_at": st.removed_at, "completed_in_sprint": st.completed_in_sprint}
+
+def _sprint_tasks(db: Session, sprint_id: int):
+    return (db.query(models.SprintTask)
+              .filter(models.SprintTask.sprint_id == sprint_id).all())
+
+def _tareas_por_id(db: Session, task_ids: list[int]) -> dict[int, dict]:
+    rows = db.query(models.Task).filter(models.Task.id.in_(task_ids)).all() if task_ids else []
+    return {t.id: {"id": t.id, "descripcion": t.descripcion, "estado": t.estado,
+                   "responsable": t.responsable, "story_points": t.story_points,
+                   "fecha_completado": t.fecha_completado} for t in rows}
+
+def get_sprint_model(db: Session, sprint_id: int):
+    return db.query(models.Sprint).filter(models.Sprint.id == sprint_id).first()
+
+def create_sprint(db: Session, data: schemas.SprintCreate, created_by: str):
+    existe = db.query(models.Sprint).filter_by(entidad=data.entidad, nombre=data.nombre).first()
+    if existe:
+        return None  # nombre duplicado en la entidad
+    sprint = models.Sprint(**data.model_dump(), created_by=created_by)
+    db.add(sprint); db.commit(); db.refresh(sprint)
+    return _sprint_dict(sprint)
+
+def list_sprints(db: Session, entidad: Optional[str] = None, estado: Optional[str] = None):
+    q = db.query(models.Sprint)
+    if entidad: q = q.filter(models.Sprint.entidad == entidad)
+    if estado:  q = q.filter(models.Sprint.estado == estado)
+    return [_sprint_dict(s) for s in q.order_by(models.Sprint.fecha_inicio.desc()).all()]
+
+def patch_sprint(db: Session, sprint_id: int, data: schemas.SprintPatch):
+    sprint = get_sprint_model(db, sprint_id)
+    if not sprint:
+        return None
+    if data.estado == "activo" and sprint.estado != "activo":
+        # Solo un sprint activo por entidad — regla de Linear Cycles
+        otro = (db.query(models.Sprint)
+                  .filter(models.Sprint.entidad == sprint.entidad,
+                          models.Sprint.estado == "activo",
+                          models.Sprint.id != sprint_id).first())
+        if otro:
+            return {"error": f"Ya hay un sprint activo en {sprint.entidad}: «{otro.nombre}»"}
+    for k, v in data.model_dump().items():
+        if v is not None:
+            setattr(sprint, k, v)
+    db.commit(); db.refresh(sprint)
+    return _sprint_dict(sprint)
+
+def get_sprint_detail(db: Session, sprint_id: int):
+    """Sprint + tareas (con snapshot y datos vivos) + velocity + burndown."""
+    sprint = get_sprint_model(db, sprint_id)
+    if not sprint:
+        return None
+    svc = SprintService()
+    sts = [_sprint_task_dict(s) for s in _sprint_tasks(db, sprint_id)]
+    tareas = _tareas_por_id(db, [s["task_id"] for s in sts])
+    detalle = _sprint_dict(sprint)
+    detalle["tareas"] = [{**s, "tarea": tareas.get(s["task_id"])} for s in sts]
+    detalle["velocity"] = svc.reporte_velocity(sts)
+    detalle["burndown"] = svc.burndown(_sprint_dict(sprint), sts, tareas,
+                                       datetime.utcnow().date())
+    return detalle
+
+def add_sprint_tasks(db: Session, sprint_id: int, task_ids: list[int]):
+    """Compromete tareas. En planning cuentan como comprometidas; si el sprint
+    ya está activo entran como churn (committed=False) — mide el mid-sprint."""
+    sprint = get_sprint_model(db, sprint_id)
+    if not sprint:
+        return None
+    tareas = _tareas_por_id(db, task_ids)
+    veredicto = SprintService().validar_compromiso(list(tareas.values()))
+    if not veredicto["ok"]:
+        return {"ok": False, **veredicto}
+
+    committed = sprint.estado == "planificado"
+    agregadas = []
+    for tid in task_ids:
+        if db.query(models.SprintTask).filter_by(sprint_id=sprint_id, task_id=tid).first():
+            continue  # ya estaba en el sprint
+        db.add(models.SprintTask(sprint_id=sprint_id, task_id=tid, committed=committed,
+                                 points_snapshot=tareas[tid]["story_points"]))
+        agregadas.append(tid)
+    db.commit()
+    return {"ok": True, "agregadas": agregadas, "committed": committed,
+            "puntos": veredicto["puntos"], "warning": veredicto["warning"]}
+
+def remove_sprint_task(db: Session, sprint_id: int, task_id: int):
+    st = db.query(models.SprintTask).filter_by(sprint_id=sprint_id, task_id=task_id).first()
+    if not st:
+        return False
+    st.removed_at = datetime.utcnow()
+    db.commit()
+    return True
+
+def close_sprint(db: Session, sprint_id: int):
+    """Cierre: fija completed_in_sprint, calcula velocity y propone carryover.
+    No mueve tareas automáticamente — el líder decide en la UI."""
+    sprint = get_sprint_model(db, sprint_id)
+    if not sprint:
+        return None
+    sts_rows = _sprint_tasks(db, sprint_id)
+    sts = [_sprint_task_dict(s) for s in sts_rows]
+    tareas = _tareas_por_id(db, [s["task_id"] for s in sts])
+    reporte = SprintService().cerrar(_sprint_dict(sprint), sts, tareas)
+
+    hechas = set(reporte["completadas"])
+    for row in sts_rows:
+        row.completed_in_sprint = row.task_id in hechas
+    sprint.estado = "cerrado"
+    db.commit()
+    return reporte
+
+def get_burndown(db: Session, sprint_id: int):
+    sprint = get_sprint_model(db, sprint_id)
+    if not sprint:
+        return None
+    sts = [_sprint_task_dict(s) for s in _sprint_tasks(db, sprint_id)]
+    tareas = _tareas_por_id(db, [s["task_id"] for s in sts])
+    return {"sprint_id": sprint_id,
+            **SprintService().burndown(_sprint_dict(sprint), sts, tareas,
+                                       datetime.utcnow().date())}
+
+def get_velocity_history(db: Session, entidad: Optional[str] = None, n: int = 6):
+    """Histórico de velocity y Say/Do sobre los últimos n sprints cerrados."""
+    svc = SprintService()
+    q = db.query(models.Sprint).filter(models.Sprint.estado == "cerrado")
+    if entidad:
+        q = q.filter(models.Sprint.entidad == entidad)
+    cerrados = q.order_by(models.Sprint.fecha_inicio).all()[-n:]
+    reportes = []
+    for s in cerrados:
+        sts = [_sprint_task_dict(x) for x in _sprint_tasks(db, s.id)]
+        reportes.append({"sprint_id": s.id, "nombre": s.nombre, "entidad": s.entidad,
+                         **svc.reporte_velocity(sts)})
+    return {"reportes": reportes, **svc.velocity_historico(reportes)}
+
+
 # ── OKRs (dirección) ────────────────────────────────────────────────────────
 
 def _kr_dict(kr, svc) -> dict:
@@ -483,6 +630,34 @@ def seed_initial_data(db: Session):
     # Historial de transiciones para que el cockpit muestre datos desde el arranque
     for t in db.query(models.Task).all():
         _backfill_transitions(db, t)
+    db.commit()
+
+    # ── Sprint activo de ejemplo (Linear Cycles) ─────────────────────────
+    # Puntos de historia deterministas por prioridad para que planning/velocity
+    # tengan datos desde el arranque
+    puntos_por_prioridad = {"Urgente": 5, "Alta": 3, "Media": 2, "Baja": 1}
+    for t in db.query(models.Task).all():
+        t.story_points = puntos_por_prioridad.get(t.prioridad, 2)
+    db.commit()
+
+    sprint = models.Sprint(
+        nombre="Sprint 1", entidad="Xertify", estado="activo",
+        objetivo="Estabilizar la operación de certificados y cerrar el piloto UniAndes",
+        fecha_inicio=(now - timedelta(days=7)).date(),
+        fecha_fin=(now + timedelta(days=7)).date(),
+        created_by="fidel",
+    )
+    db.add(sprint); db.commit(); db.refresh(sprint)
+    # Mezcla de en-curso y completadas para que el burndown de la demo descienda
+    en_sprint = (db.query(models.Task)
+                   .filter(models.Task.entidad == "Xertify",
+                           models.Task.estado == "En Proceso").limit(7).all()
+                 + db.query(models.Task)
+                     .filter(models.Task.entidad == "Xertify",
+                             models.Task.estado == "Completado").limit(3).all())
+    for t in en_sprint:
+        db.add(models.SprintTask(sprint_id=sprint.id, task_id=t.id,
+                                 committed=True, points_snapshot=t.story_points))
     db.commit()
 
     # OKRs de ejemplo (capa de dirección) para que la vista no arranque vacía

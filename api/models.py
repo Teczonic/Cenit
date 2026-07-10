@@ -26,6 +26,7 @@ class Task(Base):
     estado       = Column(String(30), default="No Iniciado")  # No Iniciado | En Proceso | Pausado | Completado
     responsable  = Column(String(80))
     comentarios  = Column(Text)
+    story_points = Column(Integer)                       # Fibonacci: 1,2,3,5,8,13,21
     fecha_inicio = Column(DateTime(timezone=True))
     fecha_fin    = Column(DateTime(timezone=True))
     fecha_completado = Column(DateTime(timezone=True))
@@ -151,6 +152,40 @@ class KanbanColumn(Base):
     is_active_state = Column(Boolean, nullable=False, default=False)   # cuenta para flow efficiency
     created_at      = Column(DateTime(timezone=True), server_default=func.now())
     updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+# ── Sprints ligeros (Linear Cycles): compromiso → velocity → carryover ─────────
+
+class Sprint(Base):
+    __tablename__ = "sprints"
+    id           = Column(Integer, primary_key=True, index=True)
+    nombre       = Column(String(80), nullable=False)
+    objetivo     = Column(Text)                            # Sprint Goal
+    entidad      = Column(String(50), nullable=False)      # mismo eje que tasks.entidad
+    fecha_inicio = Column(Date, nullable=False)
+    fecha_fin    = Column(Date, nullable=False)
+    estado       = Column(String(20), nullable=False, default="planificado")
+                   # planificado | activo | cerrado | cancelado
+    created_by   = Column(String(80))
+    created_at   = Column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (UniqueConstraint("entidad", "nombre", name="uq_sprint_nombre_entidad"),)
+
+
+class SprintTask(Base):
+    """Tabla puente sprint↔tarea. `points_snapshot` congela la estimación al
+    comprometer: el Say/Do se mide contra lo prometido, no contra re-estimaciones."""
+    __tablename__ = "sprint_tasks"
+    id                  = Column(Integer, primary_key=True, index=True)
+    sprint_id           = Column(Integer, ForeignKey("sprints.id", ondelete="CASCADE"),
+                                 nullable=False, index=True)
+    task_id             = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"),
+                                 nullable=False, index=True)
+    committed           = Column(Boolean, nullable=False, default=True)  # False = entró mid-sprint (churn)
+    points_snapshot     = Column(Integer)
+    added_at            = Column(DateTime(timezone=True), server_default=func.now())
+    removed_at          = Column(DateTime(timezone=True))               # descoped
+    completed_in_sprint = Column(Boolean, nullable=False, default=False)
+    __table_args__ = (UniqueConstraint("sprint_id", "task_id", name="uq_sprint_task"),)
 
 
 # ── OKRs: capa de dirección (tareas → resultados) ──────────────────────────────

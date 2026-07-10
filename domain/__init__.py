@@ -7,6 +7,7 @@ puede testearse con pytest sin levantar nada.
 from .entities import RiskScore, Tarea, Usuario
 from .metrics import MetricsEngine, evaluar_estado, tendencia
 from .okrs import OkrService
+from .sprints import SprintService
 from .services import (
     AnalyticsService,
     EisenhowerService,
@@ -29,6 +30,7 @@ __all__ = [
     "MetricsEngine",
     "OkrService",
     "RiesgoService",
+    "SprintService",
     "WipService",
     "evaluar_estado",
     "tendencia",

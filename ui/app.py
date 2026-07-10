@@ -23,7 +23,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ui.api_client import ApiError, CenitClient  # noqa: E402
 from ui.views import (  # noqa: E402
-    analytics, cockpit, eisenhower, equipo, importar, kanban, kpis, mi_dia, okrs, riesgos,
+    analytics, cockpit, eisenhower, equipo, importar, kanban, kpis, mi_dia, okrs,
+    riesgos, sprints,
 )
 
 st.set_page_config(page_title="Cenit", page_icon="🏔️", layout="wide")
@@ -75,6 +76,7 @@ def app():
         ],
         "Operar": [
             st.Page(kanban.render, title="Kanban", icon="📋", url_path="kanban"),
+            st.Page(sprints.render, title="Sprints", icon="🔁", url_path="sprints"),
             st.Page(eisenhower.render, title="Eisenhower", icon="🎯", url_path="eisenhower"),
             st.Page(riesgos.render, title="Riesgos", icon="⚠️", url_path="riesgos"),
         ],

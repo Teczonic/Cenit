@@ -84,6 +84,9 @@ Guía paso a paso en [DEPLOY.md](DEPLOY.md). Resumen:
   Al mover a una columna llena, Cenit avisa y sugiere terminar antes de empezar —
   persuade, no bloquea ("Mover de todas formas" registra la excepción). Los admins
   editan límites y políticas desde el propio tablero.
+- **Sprints** — ciclos ligeros estilo Linear: comprometer tareas con story points
+  (Fibonacci), burndown real vs ideal derivado de la memoria histórica, y cierre
+  con velocity, Say/Do, churn y carryover sugerido (el líder decide, no se mueve solo).
 - **Eisenhower** — matriz 2×2 importante/urgente (excluye completadas).
 - **Riesgos** — top 30 por `risk_score` (probabilidad × impacto × (1 − cobertura)).
 - **Analytics** — métricas, throughput mensual, lead time por persona.

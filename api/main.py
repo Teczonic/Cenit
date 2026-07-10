@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, status, Request # pyright: ignore[reportMissingImports]
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import Optional, List
@@ -12,10 +12,26 @@ from .database import engine, get_db, Base
 from . import models, schemas, crud
 from .auth import create_access_token, verify_token, hash_password, verify_password
 
+def _ensure_schema_upgrades():
+    """Columnas nuevas sobre tablas existentes — create_all no altera tablas,
+    así que las bases ya desplegadas (SQLite dev / Supabase prod) se parchan aquí."""
+    upgrades = {"tasks": {"story_points": "INTEGER"}}
+    insp = inspect(engine)
+    for tabla, columnas in upgrades.items():
+        if tabla not in insp.get_table_names():
+            continue
+        existentes = {c["name"] for c in insp.get_columns(tabla)}
+        for col, tipo in columnas.items():
+            if col not in existentes:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN {col} {tipo}"))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
         Base.metadata.create_all(bind=engine)
+        _ensure_schema_upgrades()
         db = next(get_db())
         try:
             if not crud.get_all_users(db):
@@ -88,11 +104,13 @@ def list_tasks(
 @app.post("/api/tasks", response_model=schemas.TaskOut)
 def create_task(data: schemas.TaskCreate, request: Request, db: Session = Depends(get_db)):
     payload = verify_token(request)
+    _validar_story_points(data.story_points)
     return crud.create_task(db, data, created_by=payload["username"])
 
 @app.put("/api/tasks/{task_id}", response_model=schemas.TaskOut)
 def update_task(task_id: int, data: schemas.TaskUpdate, request: Request, db: Session = Depends(get_db)):
     payload = verify_token(request)
+    _validar_story_points(data.story_points)
     task = crud.update_task(db, task_id, data, changed_by=payload.get("username"))
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
@@ -176,6 +194,95 @@ def analytics_lead_time(db: Session = Depends(get_db)):
 def analytics_flow(db: Session = Depends(get_db)):
     """Motor de flujo: lead time real, cycle time, flow efficiency y aging."""
     return crud.get_flow_metrics(db)
+
+# ── Sprints ligeros (Linear Cycles) ─────────────────────────────────────────
+
+FIBONACCI = (1, 2, 3, 5, 8, 13, 21)
+
+def _validar_story_points(points):
+    if points is not None and points not in FIBONACCI:
+        raise HTTPException(status_code=400,
+                            detail=f"story_points debe ser Fibonacci: {FIBONACCI}")
+
+@app.post("/api/sprints")
+def create_sprint(data: schemas.SprintCreate, request: Request, db: Session = Depends(get_db)):
+    payload = verify_token(request)
+    if data.fecha_fin <= data.fecha_inicio:
+        raise HTTPException(status_code=400, detail="fecha_fin debe ser posterior a fecha_inicio")
+    sprint = crud.create_sprint(db, data, created_by=payload["username"])
+    if sprint is None:
+        raise HTTPException(status_code=400, detail="Ya existe un sprint con ese nombre en la entidad")
+    return sprint
+
+@app.get("/api/sprints")
+def list_sprints(entidad: Optional[str] = None, estado: Optional[str] = None,
+                 db: Session = Depends(get_db)):
+    return crud.list_sprints(db, entidad=entidad, estado=estado)
+
+@app.get("/api/sprints/{sprint_id}")
+def sprint_detail(sprint_id: int, db: Session = Depends(get_db)):
+    detalle = crud.get_sprint_detail(db, sprint_id)
+    if not detalle:
+        raise HTTPException(status_code=404, detail="Sprint no encontrado")
+    return detalle
+
+@app.patch("/api/sprints/{sprint_id}")
+def patch_sprint(sprint_id: int, data: schemas.SprintPatch, request: Request,
+                 db: Session = Depends(get_db)):
+    verify_token(request)
+    if data.estado and data.estado not in ("planificado", "activo", "cerrado", "cancelado"):
+        raise HTTPException(status_code=400, detail="Estado de sprint inválido")
+    res = crud.patch_sprint(db, sprint_id, data)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Sprint no encontrado")
+    if "error" in res:
+        raise HTTPException(status_code=409, detail=res["error"])
+    return res
+
+@app.post("/api/sprints/{sprint_id}/tasks")
+def add_sprint_tasks(sprint_id: int, body: schemas.SprintTasksAdd, request: Request,
+                     db: Session = Depends(get_db)):
+    verify_token(request)
+    res = crud.add_sprint_tasks(db, sprint_id, body.task_ids)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Sprint no encontrado")
+    if not res["ok"]:
+        # Compromiso sin estimación no es compromiso — 400 con las tareas sin puntos
+        raise HTTPException(status_code=400, detail={
+            "mensaje": res["warning"], "sin_puntos": res["sin_puntos"]})
+    return res
+
+@app.delete("/api/sprints/{sprint_id}/tasks/{task_id}")
+def remove_sprint_task(sprint_id: int, task_id: int, request: Request,
+                       db: Session = Depends(get_db)):
+    verify_token(request)
+    if not crud.remove_sprint_task(db, sprint_id, task_id):
+        raise HTTPException(status_code=404, detail="La tarea no está en el sprint")
+    return {"ok": True}
+
+@app.post("/api/sprints/{sprint_id}/close")
+def close_sprint(sprint_id: int, request: Request, db: Session = Depends(get_db)):
+    payload = verify_token(request)
+    sprint = crud.get_sprint_model(db, sprint_id)
+    if not sprint:
+        raise HTTPException(status_code=404, detail="Sprint no encontrado")
+    if payload.get("role") != "admin" and payload.get("username") != sprint.created_by:
+        raise HTTPException(status_code=403, detail="Solo el creador del sprint o un admin puede cerrarlo")
+    if sprint.estado == "cerrado":
+        raise HTTPException(status_code=400, detail="El sprint ya está cerrado")
+    return crud.close_sprint(db, sprint_id)
+
+@app.get("/api/sprints/{sprint_id}/burndown")
+def sprint_burndown(sprint_id: int, db: Session = Depends(get_db)):
+    res = crud.get_burndown(db, sprint_id)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Sprint no encontrado")
+    return res
+
+@app.get("/api/analytics/velocity")
+def analytics_velocity(entidad: Optional[str] = None, n: int = 6, db: Session = Depends(get_db)):
+    """Histórico de velocity y Say/Do — la predictibilidad del equipo."""
+    return crud.get_velocity_history(db, entidad=entidad, n=n)
 
 # ── OKRs (dirección) ────────────────────────────────────────────────────────
 

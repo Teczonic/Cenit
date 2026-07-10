@@ -31,6 +31,7 @@ class TaskCreate(BaseModel):
     estado: str = "No Iniciado"
     responsable: Optional[str] = None
     comentarios: Optional[str] = None
+    story_points: Optional[int] = None   # Fibonacci: 1,2,3,5,8,13,21
     fecha_inicio: Optional[datetime] = None
     fecha_fin: Optional[datetime] = None
 
@@ -43,6 +44,7 @@ class TaskUpdate(BaseModel):
     estado: Optional[str] = None
     responsable: Optional[str] = None
     comentarios: Optional[str] = None
+    story_points: Optional[int] = None
     fecha_inicio: Optional[datetime] = None
     fecha_fin: Optional[datetime] = None
 
@@ -78,6 +80,24 @@ class TransitionOut(BaseModel):
     changed_at: Optional[datetime]
     class Config:
         from_attributes = True
+
+# ── Sprints ligeros ──────────────────────────────────────────────────────────
+
+class SprintCreate(BaseModel):
+    nombre: str
+    entidad: str
+    fecha_inicio: date
+    fecha_fin: date
+    objetivo: Optional[str] = None
+
+class SprintPatch(BaseModel):
+    objetivo: Optional[str] = None
+    fecha_inicio: Optional[date] = None
+    fecha_fin: Optional[date] = None
+    estado: Optional[str] = None    # planificado | activo | cerrado | cancelado
+
+class SprintTasksAdd(BaseModel):
+    task_ids: list[int]
 
 # ── OKRs ────────────────────────────────────────────────────────────────────
 
@@ -133,6 +153,7 @@ class TaskOut(BaseModel):
     estado: str
     responsable: Optional[str]
     comentarios: Optional[str]
+    story_points: Optional[int] = None
     fecha_inicio: Optional[datetime]
     fecha_fin: Optional[datetime]
     fecha_completado: Optional[datetime]

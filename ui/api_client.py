@@ -109,6 +109,40 @@ class CenitClient:
     def wip_status(self) -> dict:
         return self._request("GET", "/api/kanban/wip-status")
 
+    # ── Sprints ──────────────────────────────────────────────────────
+
+    def sprints(self, entidad: str | None = None, estado: str | None = None) -> list[dict]:
+        params = {k: v for k, v in {"entidad": entidad, "estado": estado}.items() if v}
+        return self._request("GET", "/api/sprints", params=params)
+
+    def create_sprint(self, data: dict) -> dict:
+        return self._request("POST", "/api/sprints", json=data)
+
+    def sprint_detail(self, sprint_id: int) -> dict:
+        return self._request("GET", f"/api/sprints/{sprint_id}")
+
+    def patch_sprint(self, sprint_id: int, data: dict) -> dict:
+        return self._request("PATCH", f"/api/sprints/{sprint_id}", json=data)
+
+    def add_sprint_tasks(self, sprint_id: int, task_ids: list[int]) -> dict:
+        return self._request("POST", f"/api/sprints/{sprint_id}/tasks",
+                             json={"task_ids": task_ids})
+
+    def remove_sprint_task(self, sprint_id: int, task_id: int) -> dict:
+        return self._request("DELETE", f"/api/sprints/{sprint_id}/tasks/{task_id}")
+
+    def close_sprint(self, sprint_id: int) -> dict:
+        return self._request("POST", f"/api/sprints/{sprint_id}/close")
+
+    def sprint_burndown(self, sprint_id: int) -> dict:
+        return self._request("GET", f"/api/sprints/{sprint_id}/burndown")
+
+    def analytics_velocity(self, entidad: str | None = None, n: int = 6) -> dict:
+        params = {"n": n}
+        if entidad:
+            params["entidad"] = entidad
+        return self._request("GET", "/api/analytics/velocity", params=params)
+
     # ── Analytics ────────────────────────────────────────────────────
 
     def analytics_summary(self) -> dict:

@@ -136,13 +136,20 @@ def dialogo_tarea(tarea: Optional[dict] = None):
                                        index=nombres.index(t["responsable"]) if t.get("responsable") in nombres else 0)
             cliente = st.text_input("Cliente", value=t.get("cliente") or "")
 
-        c4, c5 = st.columns(2)
+        c4, c5, c6 = st.columns(3)
         with c4:
             ff_actual = None
             if t.get("fecha_fin"):
                 ff_actual = datetime.fromisoformat(str(t["fecha_fin"]).replace("Z", "+00:00")).date()
             fecha_fin = st.date_input("Fecha límite", value=ff_actual)
         with c5:
+            fib = [None, 1, 2, 3, 5, 8, 13, 21]
+            story_points = st.selectbox(
+                "Story points", fib,
+                index=fib.index(t["story_points"]) if t.get("story_points") in fib else 0,
+                format_func=lambda x: "—" if x is None else str(x),
+            )
+        with c6:
             comentarios = st.text_input("Comentarios", value=t.get("comentarios") or "")
 
         if st.form_submit_button("Guardar", type="primary", use_container_width=True):
@@ -158,6 +165,7 @@ def dialogo_tarea(tarea: Optional[dict] = None):
                 "estado": estado,
                 "responsable": responsable or None,
                 "comentarios": comentarios or None,
+                "story_points": story_points,
                 "fecha_fin": (
                     datetime.combine(fecha_fin, datetime.min.time()).isoformat()
                     if isinstance(fecha_fin, date) else None

@@ -14,8 +14,11 @@ El roadmap parte de un hecho que las secciones teóricas no tenían: **el MVP ya
 - [x] Importar CSV (diagnóstico con datos reales).
 - [x] OKRs (adelanto de V2: ciclos, objetivos, KRs, alineación).
 - [x] Deploy reproducible (Vercel + Supabase + Docker + CI, 59 tests).
+- [x] Límites WIP explícitos en el tablero (`kanban_columns` + `WipService`, semáforo
+      ámbar/rojo, políticas por columna, 409 persuasivo con `force` — el sistema
+      persuade, no bloquea).
 
-**Criterio de aceptación de MVP:** un líder entra, importa su CSV y en 15 min entiende qué atender hoy. **Pendiente para cerrarlo del todo:** UI en Streamlit Cloud accesible al piloto + límites WIP explícitos en el tablero.
+**Criterio de aceptación de MVP:** un líder entra, importa su CSV y en 15 min entiende qué atender hoy. **Pendiente para cerrarlo del todo:** UI en Streamlit Cloud accesible al piloto (operativo, no de código).
 
 **Duración restante:** 1 sprint. **Riesgo:** que el diagnóstico no genere el "ajá" — se mitiga con las 5 entrevistas de la capa transversal.
 
@@ -23,8 +26,11 @@ El roadmap parte de un hecho que las secciones teóricas no tenían: **el MVP ya
 
 **Metodologías activas:** KPIs (RICE 4.0), Scrum ligero (3.7), consolidación Kanban+Lean.
 
-- [ ] Motor de métricas/KPIs (`metric_definitions` + `metric_snapshots`) con semáforo, metas y alertas.
-- [ ] Sprints ligeros estilo Linear Cycles: compromiso, velocity, burndown, cierre con carryover.
+- [x] Motor de métricas/KPIs (`metric_definitions` + `metric_snapshots`) con semáforo, metas y alertas.
+- [x] Sprints ligeros estilo Linear Cycles: compromiso (planning valida puntos y
+      sobre-compromiso), velocity con Say/Do y churn, burndown real vs ideal derivado
+      de `fecha_completado` (sin snapshots diarios — menos infraestructura, mismo
+      diagnóstico), cierre con carryover sugerido que el líder decide.
 - [ ] Capa Lean sobre `task_state_transitions`: flow efficiency, desperdicio, bloqueos.
 - [ ] Reporte semanal automático (estado ejecutivo + riesgos + próximos bloqueos) vía Vercel Cron.
 
