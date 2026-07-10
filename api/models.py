@@ -154,6 +154,22 @@ class KanbanColumn(Base):
     updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class WasteEvent(Base):
+    """Bloqueo/desperdicio reportado con taxonomía Lean (7 mudas del software).
+    resolved_at NULL = bloqueo activo. Cenit también detecta desperdicio
+    automáticamente desde el historial; esta tabla guarda lo reportado a mano."""
+    __tablename__ = "waste_events"
+    id          = Column(Integer, primary_key=True, index=True)
+    task_id     = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"),
+                         nullable=False, index=True)
+    waste_type  = Column(String(30), nullable=False)  # espera|handoff|retrabajo|multitasking|sobreproceso|defecto|trabajo_parcial
+    descripcion = Column(Text)
+    reported_by = Column(String(80))                  # username, consistente con changed_by
+    started_at  = Column(DateTime(timezone=True), server_default=func.now())
+    resolved_at = Column(DateTime(timezone=True))
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())
+
+
 # ── Sprints ligeros (Linear Cycles): compromiso → velocity → carryover ─────────
 
 class Sprint(Base):

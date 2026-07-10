@@ -5,6 +5,7 @@ puede testearse con pytest sin levantar nada.
 """
 
 from .entities import RiskScore, Tarea, Usuario
+from .lean import LeanService
 from .metrics import MetricsEngine, evaluar_estado, tendencia
 from .okrs import OkrService
 from .sprints import SprintService
@@ -27,6 +28,7 @@ __all__ = [
     "FiltroService",
     "FlowService",
     "KanbanService",
+    "LeanService",
     "MetricsEngine",
     "OkrService",
     "RiesgoService",

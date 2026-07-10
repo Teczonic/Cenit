@@ -11,6 +11,7 @@ import os
 from .database import engine, get_db, Base
 from . import models, schemas, crud
 from .auth import create_access_token, verify_token, hash_password, verify_password
+from domain.lean import WASTE_TYPES
 
 def _ensure_schema_upgrades():
     """Columnas nuevas sobre tablas existentes — create_all no altera tablas,
@@ -194,6 +195,33 @@ def analytics_lead_time(db: Session = Depends(get_db)):
 def analytics_flow(db: Session = Depends(get_db)):
     """Motor de flujo: lead time real, cycle time, flow efficiency y aging."""
     return crud.get_flow_metrics(db)
+
+# ── Lean: desperdicio y bloqueos ──────────────────────────────────────────────
+
+@app.get("/api/analytics/lean")
+def analytics_lean(db: Session = Depends(get_db)):
+    """Capa Lean: pareto de desperdicio, bloqueos, retrabajo, zombis y Little."""
+    return crud.get_lean_summary(db)
+
+@app.post("/api/tasks/{task_id}/waste")
+def report_waste(task_id: int, data: schemas.WasteCreate, request: Request,
+                 db: Session = Depends(get_db)):
+    payload = verify_token(request)
+    if data.waste_type not in WASTE_TYPES:
+        raise HTTPException(status_code=400,
+                            detail=f"waste_type debe ser uno de: {', '.join(WASTE_TYPES)}")
+    res = crud.create_waste_event(db, task_id, data, reported_by=payload.get("username"))
+    if res is None:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    return res
+
+@app.patch("/api/waste/{waste_id}/resolve")
+def resolve_waste(waste_id: int, request: Request, db: Session = Depends(get_db)):
+    verify_token(request)
+    res = crud.resolve_waste_event(db, waste_id)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Bloqueo no encontrado")
+    return res
 
 # ── Sprints ligeros (Linear Cycles) ─────────────────────────────────────────
 

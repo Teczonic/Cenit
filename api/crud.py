@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from . import models, schemas
 from .auth import hash_password
+from domain.lean import LeanService
 from domain.services import FlowService, WipService
 from domain.sprints import SprintService
 import random
@@ -256,6 +257,57 @@ def evaluar_wip_movimiento(db: Session, estado_destino: str, responsable: Option
     columnas = [_col_dict(c) for c in get_kanban_columns(db)]
     return WipService().evaluar_movimiento(_tareas_wip(db), columnas,
                                            estado_destino, responsable=responsable)
+
+
+# ── Lean: desperdicio y bloqueos ─────────────────────────────────────────────
+
+def _waste_dict(w: "models.WasteEvent") -> dict:
+    return {"id": w.id, "task_id": w.task_id, "waste_type": w.waste_type,
+            "descripcion": w.descripcion, "reported_by": w.reported_by,
+            "started_at": w.started_at, "resolved_at": w.resolved_at}
+
+def create_waste_event(db: Session, task_id: int, data: schemas.WasteCreate,
+                       reported_by: Optional[str] = None):
+    if not get_task(db, task_id):
+        return None
+    w = models.WasteEvent(task_id=task_id, waste_type=data.waste_type,
+                          descripcion=data.descripcion, reported_by=reported_by)
+    db.add(w); db.commit(); db.refresh(w)
+    return _waste_dict(w)
+
+def resolve_waste_event(db: Session, waste_id: int):
+    w = db.query(models.WasteEvent).filter(models.WasteEvent.id == waste_id).first()
+    if not w:
+        return None
+    if not w.resolved_at:
+        w.resolved_at = datetime.utcnow()
+        db.commit()
+    db.refresh(w)
+    return _waste_dict(w)
+
+def get_lean_summary(db: Session):
+    """Capa Lean sobre la memoria histórica: desperdicio (reportado + detectado),
+    retrabajo, tareas zombi y Ley de Little."""
+    def _naive(dt):
+        return dt.replace(tzinfo=None) if dt and dt.tzinfo else dt
+
+    tareas = [{"id": t.id, "descripcion": t.descripcion, "estado": t.estado,
+               "responsable": t.responsable, "fecha_completado": _naive(t.fecha_completado)}
+              for t in db.query(models.Task).all()]
+    transiciones = [{"task_id": r.task_id, "from_state": r.from_state,
+                     "to_state": r.to_state, "changed_at": _naive(r.changed_at)}
+                    for r in db.query(models.TaskStateTransition).all()]
+    waste = []
+    for w in db.query(models.WasteEvent).all():
+        d = _waste_dict(w)
+        d["started_at"] = _naive(d["started_at"])
+        d["resolved_at"] = _naive(d["resolved_at"])
+        waste.append(d)
+
+    ahora = datetime.utcnow()
+    flow = FlowService().resumen(transiciones, ahora)
+    return LeanService().resumen(tareas, transiciones, waste, ahora,
+                                 flow_efficiency_avg=flow.get("flow_efficiency_avg"))
 
 
 # ── Sprints ligeros (Linear Cycles) ──────────────────────────────────────────

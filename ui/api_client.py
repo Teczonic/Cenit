@@ -160,6 +160,18 @@ class CenitClient:
     def task_transitions(self, task_id: int) -> list[dict]:
         return self._request("GET", f"/api/tasks/{task_id}/transitions")
 
+    # ── Lean ─────────────────────────────────────────────────────────
+
+    def analytics_lean(self) -> dict:
+        return self._request("GET", "/api/analytics/lean")
+
+    def report_waste(self, task_id: int, waste_type: str, descripcion: str | None = None) -> dict:
+        return self._request("POST", f"/api/tasks/{task_id}/waste",
+                             json={"waste_type": waste_type, "descripcion": descripcion})
+
+    def resolve_waste(self, waste_id: int) -> dict:
+        return self._request("PATCH", f"/api/waste/{waste_id}/resolve")
+
     # ── OKRs ─────────────────────────────────────────────────────────
 
     def okr_cycles(self) -> list[dict]:

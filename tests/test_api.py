@@ -222,6 +222,52 @@ class TestWipLimits:
         assert res.status_code == 200
 
 
+class TestLean:
+    def test_resumen_lean_estructura(self, client):
+        res = client.get("/api/analytics/lean")
+        assert res.status_code == 200
+        body = res.json()
+        for clave in ("pareto", "detecciones", "bloqueos_activos",
+                      "tareas_zombi", "little", "tasa_retrabajo"):
+            assert clave in body
+        assert body["little"]["wip_actual"] > 0  # el seed tiene WIP
+
+    def test_reportar_bloqueo_requiere_token(self, client):
+        res = client.post("/api/tasks/1/waste", json={"waste_type": "espera"})
+        assert res.status_code == 401
+
+    def test_waste_type_invalido_da_400(self, client, token):
+        tarea = client.get("/api/tasks").json()[0]
+        res = client.post(f'/api/tasks/{tarea["id"]}/waste',
+                          json={"waste_type": "aburrimiento"}, headers=auth(token))
+        assert res.status_code == 400
+
+    def test_reportar_y_resolver_bloqueo(self, client, token):
+        tarea = client.get("/api/tasks", params={"status": "En Proceso"}).json()[0]
+        w = client.post(f'/api/tasks/{tarea["id"]}/waste',
+                        json={"waste_type": "espera", "descripcion": "Esperando al cliente"},
+                        headers=auth(token)).json()
+        assert w["reported_by"] == "fidel"
+        assert w["resolved_at"] is None
+
+        # Aparece como bloqueo activo en el resumen
+        lean = client.get("/api/analytics/lean").json()
+        assert any(b["id"] == w["id"] for b in lean["bloqueos_activos"])
+        assert any(p["waste_type"] == "espera" for p in lean["pareto"])
+
+        # Resolver lo saca de los activos
+        r = client.patch(f'/api/waste/{w["id"]}/resolve', headers=auth(token)).json()
+        assert r["resolved_at"] is not None
+        lean = client.get("/api/analytics/lean").json()
+        assert not any(b["id"] == w["id"] for b in lean["bloqueos_activos"])
+
+    def test_seed_detecta_desperdicio_automatico(self, client):
+        # El seed tiene pausas viejas y responsables cargados: la detección
+        # automática debe encontrar algo sin que nadie reporte nada
+        lean = client.get("/api/analytics/lean").json()
+        assert len(lean["detecciones"]) > 0
+
+
 class TestSprints:
     def test_seed_trae_sprint_activo_con_detalle(self, client):
         sprints = client.get("/api/sprints", params={"estado": "activo"}).json()

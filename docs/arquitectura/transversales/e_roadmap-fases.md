@@ -31,7 +31,10 @@ El roadmap parte de un hecho que las secciones teóricas no tenían: **el MVP ya
       sobre-compromiso), velocity con Say/Do y churn, burndown real vs ideal derivado
       de `fecha_completado` (sin snapshots diarios — menos infraestructura, mismo
       diagnóstico), cierre con carryover sugerido que el líder decide.
-- [ ] Capa Lean sobre `task_state_transitions`: flow efficiency, desperdicio, bloqueos.
+- [x] Capa Lean sobre `task_state_transitions`: pestaña en Analytics (regla del panel:
+      sin módulo nuevo en el menú) con pareto de desperdicio (reportado en `waste_events`
+      + detección automática de multitasking, trabajo parcial y retrabajo), bloqueos
+      con resolución, tareas zombi y Ley de Little (WIP/throughput vs lead time real).
 - [ ] Reporte semanal automático (estado ejecutivo + riesgos + próximos bloqueos) vía Vercel Cron.
 
 **Criterio de aceptación:** 3-5 equipos vuelven **cada semana sin que los empujes** y al menos uno configura un KPI con meta propia. **Duración:** 3-4 sprints. **Riesgo:** meter demasiadas vistas y matar el onboarding — regla del panel: ningún módulo entra al menú hasta que Kanban+KPIs demuestren retención.

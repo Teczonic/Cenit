@@ -89,7 +89,9 @@ Guía paso a paso en [DEPLOY.md](DEPLOY.md). Resumen:
   con velocity, Say/Do, churn y carryover sugerido (el líder decide, no se mueve solo).
 - **Eisenhower** — matriz 2×2 importante/urgente (excluye completadas).
 - **Riesgos** — top 30 por `risk_score` (probabilidad × impacto × (1 − cobertura)).
-- **Analytics** — métricas, throughput mensual, lead time por persona.
+- **Analytics** — métricas, throughput mensual, lead time por persona; pestaña
+  **Lean** con pareto de desperdicio (bloqueos reportados + detección automática de
+  multitasking, trabajo parcial y retrabajo), tareas zombi y Ley de Little.
 - **Equipo** — carga por responsable; los admins crean usuarios.
 - **Importar CSV** — sube un export de Jira/Trello/Excel; Cenit detecta las columnas
   y crea las tareas, habilitando el diagnóstico inmediato en el Cockpit.

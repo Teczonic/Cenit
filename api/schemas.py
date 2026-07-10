@@ -81,6 +81,12 @@ class TransitionOut(BaseModel):
     class Config:
         from_attributes = True
 
+# ── Lean: bloqueos / desperdicio ─────────────────────────────────────────────
+
+class WasteCreate(BaseModel):
+    waste_type: str                     # espera | handoff | retrabajo | multitasking | sobreproceso | defecto | trabajo_parcial
+    descripcion: Optional[str] = None
+
 # ── Sprints ligeros ──────────────────────────────────────────────────────────
 
 class SprintCreate(BaseModel):
