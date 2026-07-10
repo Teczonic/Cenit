@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from . import models, schemas
 from .auth import hash_password
-from domain.services import FlowService
+from domain.services import FlowService, WipService
 import random
 
 
@@ -39,6 +39,9 @@ def create_user(db: Session, data: schemas.UserCreate):
     return user
 
 # ── Tasks ──────────────────────────────────────────────────────────────────────
+
+def get_task(db: Session, task_id: int):
+    return db.query(models.Task).filter(models.Task.id == task_id).first()
 
 def get_tasks(db: Session, status=None, responsable=None, prioridad=None, entidad=None):
     q = db.query(models.Task)
@@ -184,6 +187,74 @@ def get_flow_metrics(db: Session):
         for r in rows
     ]
     return FlowService().resumen(transiciones, datetime.utcnow())
+
+
+# ── Kanban: límites WIP y políticas ──────────────────────────────────────────
+
+DEFAULT_KANBAN_COLUMNS = [
+    {"estado": "No Iniciado", "posicion": 1, "wip_limit": None, "wip_limit_scope": "board",
+     "is_active_state": False,
+     "policy_text": "Backlog priorizado. Entra al tablero solo con descripción y responsable."},
+    {"estado": "En Proceso", "posicion": 2, "wip_limit": 10, "wip_limit_scope": "board",
+     "is_active_state": True,
+     "policy_text": "Máximo 2 por persona. Debe tener fecha de inicio."},
+    {"estado": "Pausado", "posicion": 3, "wip_limit": 5, "wip_limit_scope": "board",
+     "is_active_state": False,
+     "policy_text": "Requiere comentario con el motivo del bloqueo."},
+    {"estado": "Completado", "posicion": 4, "wip_limit": None, "wip_limit_scope": "board",
+     "is_active_state": False,
+     "policy_text": "Verificado por alguien distinto al responsable."},
+]
+
+def ensure_kanban_columns(db: Session):
+    """Siembra la config de columnas si falta — idempotente, sirve también
+    para bases ya desplegadas donde create_all creó la tabla vacía."""
+    existentes = {c.estado for c in db.query(models.KanbanColumn).all()}
+    faltantes = [spec for spec in DEFAULT_KANBAN_COLUMNS if spec["estado"] not in existentes]
+    for spec in faltantes:
+        db.add(models.KanbanColumn(**spec))
+    if faltantes:
+        db.commit()
+
+def get_kanban_columns(db: Session):
+    ensure_kanban_columns(db)
+    return db.query(models.KanbanColumn).order_by(models.KanbanColumn.posicion).all()
+
+def update_kanban_column(db: Session, estado: str, data: schemas.KanbanColumnUpdate):
+    ensure_kanban_columns(db)
+    col = db.query(models.KanbanColumn).filter(models.KanbanColumn.estado == estado).first()
+    if not col:
+        return None
+    col.wip_limit = data.wip_limit          # None borra el límite (config completa)
+    if data.wip_limit_scope:
+        col.wip_limit_scope = data.wip_limit_scope
+    if data.policy_text is not None:
+        col.policy_text = data.policy_text
+    db.commit(); db.refresh(col)
+    return col
+
+def _col_dict(c: "models.KanbanColumn") -> dict:
+    return {"id": c.id, "estado": c.estado, "posicion": c.posicion,
+            "wip_limit": c.wip_limit, "wip_limit_scope": c.wip_limit_scope,
+            "policy_text": c.policy_text, "is_active_state": c.is_active_state}
+
+def _tareas_wip(db: Session) -> list[dict]:
+    return [{"id": t.id, "estado": t.estado, "responsable": t.responsable,
+             "descripcion": t.descripcion, "fecha_inicio": t.fecha_inicio,
+             "created_at": t.created_at}
+            for t in db.query(models.Task).all()]
+
+def get_wip_status(db: Session):
+    """Ocupación actual de cada columna contra su límite WIP."""
+    columnas = [_col_dict(c) for c in get_kanban_columns(db)]
+    return {"columnas": columnas,
+            "wip": WipService().ocupacion(_tareas_wip(db), columnas)}
+
+def evaluar_wip_movimiento(db: Session, estado_destino: str, responsable: Optional[str] = None):
+    """Veredicto de si mover una tarea a `estado_destino` excede el límite WIP."""
+    columnas = [_col_dict(c) for c in get_kanban_columns(db)]
+    return WipService().evaluar_movimiento(_tareas_wip(db), columnas,
+                                           estado_destino, responsable=responsable)
 
 
 # ── OKRs (dirección) ────────────────────────────────────────────────────────

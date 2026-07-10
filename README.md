@@ -79,7 +79,11 @@ Guía paso a paso en [DEPLOY.md](DEPLOY.md). Resumen:
   y alineación (% de tareas abiertas vinculadas a un resultado).
 - **KPIs** — motor de métricas: cada indicador con meta, umbral y semáforo
   verde/ámbar/rojo, más tendencia e historial de mediciones.
-- **Kanban** — 4 columnas por estado, mover tareas entre estados.
+- **Kanban** — 4 columnas por estado con **límites WIP explícitos**: cada columna
+  muestra su ocupación contra el límite (semáforo ámbar/rojo) y su política explícita.
+  Al mover a una columna llena, Cenit avisa y sugiere terminar antes de empezar —
+  persuade, no bloquea ("Mover de todas formas" registra la excepción). Los admins
+  editan límites y políticas desde el propio tablero.
 - **Eisenhower** — matriz 2×2 importante/urgente (excluye completadas).
 - **Riesgos** — top 30 por `risk_score` (probabilidad × impacto × (1 − cobertura)).
 - **Analytics** — métricas, throughput mensual, lead time por persona.
@@ -94,6 +98,12 @@ Cada cambio de estado se registra en `task_state_transitions`. Sobre ese histori
 (tiempo activo vs pausado) y aging. Expuesto en `GET /api/analytics/flow` y en
 `GET /api/tasks/{id}/transitions`. Es el cimiento del cockpit y de las métricas
 futuras (DORA, Lean) — la ventaja de Cenit está en la memoria histórica.
+
+Los límites WIP viven en `kanban_columns` (`GET/PUT /api/kanban/columns`,
+`GET /api/kanban/wip-status`); `domain/services.py::WipService` calcula la ocupación
+(scope por tablero o por persona) y evalúa cada movimiento. `PATCH /api/tasks/{id}/status`
+responde `409` con contexto (límite, ocupación, tareas más antiguas) cuando un movimiento
+excede el límite, y `force=true` lo registra como excepción.
 
 ## Dirección (OKRs)
 

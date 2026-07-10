@@ -9,7 +9,13 @@ import requests
 
 
 class ApiError(Exception):
-    pass
+    """Error de la API. Cuando el detail es estructurado (p. ej. el veredicto
+    WIP de un 409), queda disponible en `payload` junto al `status_code`."""
+
+    def __init__(self, message: str, status_code: Optional[int] = None, payload: Optional[dict] = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.payload = payload
 
 
 def get_base_url() -> str:
@@ -40,7 +46,10 @@ class CenitClient:
                 detail = res.json().get("detail", res.text)
             except ValueError:
                 detail = res.text
-            raise ApiError(f"{res.status_code}: {detail}")
+            if isinstance(detail, dict):
+                raise ApiError(f'{res.status_code}: {detail.get("mensaje", detail)}',
+                               status_code=res.status_code, payload=detail)
+            raise ApiError(f"{res.status_code}: {detail}", status_code=res.status_code)
         return res.json()
 
     # ── Auth ─────────────────────────────────────────────────────────
@@ -81,9 +90,24 @@ class CenitClient:
     def delete_task(self, task_id: int) -> dict:
         return self._request("DELETE", f"/api/tasks/{task_id}")
 
-    def patch_status(self, task_id: int, estado: str) -> dict:
+    def patch_status(self, task_id: int, estado: str, force: bool = False) -> dict:
         return self._request("PATCH", f"/api/tasks/{task_id}/status",
-                             json={"estado": estado})
+                             json={"estado": estado, "force": force})
+
+    # ── Kanban: límites WIP ──────────────────────────────────────────
+
+    def kanban_columns(self) -> list[dict]:
+        return self._request("GET", "/api/kanban/columns")
+
+    def update_kanban_column(self, estado: str, wip_limit=None,
+                             wip_limit_scope=None, policy_text=None) -> dict:
+        return self._request("PUT", f"/api/kanban/columns/{estado}", json={
+            "wip_limit": wip_limit, "wip_limit_scope": wip_limit_scope,
+            "policy_text": policy_text,
+        })
+
+    def wip_status(self) -> dict:
+        return self._request("GET", "/api/kanban/wip-status")
 
     # ── Analytics ────────────────────────────────────────────────────
 

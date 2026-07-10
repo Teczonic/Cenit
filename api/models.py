@@ -135,6 +135,24 @@ class TaskStateTransition(Base):
     reason     = Column(Text)
 
 
+class KanbanColumn(Base):
+    """Configuración explícita del tablero: límites WIP y políticas por columna.
+
+    Práctica 2 y 4 de Kanban (Anderson): limitar el trabajo en curso y hacer
+    las políticas explícitas. NULL en wip_limit = columna sin límite.
+    """
+    __tablename__ = "kanban_columns"
+    id              = Column(Integer, primary_key=True, index=True)
+    estado          = Column(String(30), unique=True, nullable=False)  # mapea 1:1 a tasks.estado
+    posicion        = Column(Integer, nullable=False)                  # orden visual
+    wip_limit       = Column(Integer)                                  # NULL = sin límite
+    wip_limit_scope = Column(String(10), nullable=False, default="board")  # board | person
+    policy_text     = Column(Text)                                     # criterio explícito de la columna
+    is_active_state = Column(Boolean, nullable=False, default=False)   # cuenta para flow efficiency
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 # ── OKRs: capa de dirección (tareas → resultados) ──────────────────────────────
 
 class OkrCycle(Base):

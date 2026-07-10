@@ -48,6 +48,26 @@ class TaskUpdate(BaseModel):
 
 class StatusPatch(BaseModel):
     estado: str
+    force: bool = False  # True = mover aunque exceda el límite WIP (persuade, no bloquea)
+
+# ── Kanban: límites WIP y políticas ──────────────────────────────────────────
+
+class KanbanColumnOut(BaseModel):
+    id: int
+    estado: str
+    posicion: int
+    wip_limit: Optional[int]
+    wip_limit_scope: str
+    policy_text: Optional[str]
+    is_active_state: bool
+    class Config:
+        from_attributes = True
+
+class KanbanColumnUpdate(BaseModel):
+    """Config completa de la columna: wip_limit=None borra el límite."""
+    wip_limit: Optional[int] = None
+    wip_limit_scope: Optional[str] = None   # board | person; None conserva el actual
+    policy_text: Optional[str] = None
 
 class TransitionOut(BaseModel):
     id: int

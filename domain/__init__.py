@@ -14,6 +14,7 @@ from .services import (
     FlowService,
     KanbanService,
     RiesgoService,
+    WipService,
 )
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "MetricsEngine",
     "OkrService",
     "RiesgoService",
+    "WipService",
     "evaluar_estado",
     "tendencia",
 ]

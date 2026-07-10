@@ -80,10 +80,34 @@ def tarjeta_tarea(t: dict, key_prefix: str = ""):
                     st.toast(f"Estado: {nuevo}")
                     recargar()
                 except ApiError as e:
-                    st.error(str(e))
+                    if e.status_code == 409 and e.payload:
+                        _aviso_wip(t, nuevo, e.payload, key_prefix)
+                    else:
+                        st.error(str(e))
         with col2:
             if st.button("Editar", key=f"{key_prefix}edit_{t['id']}", use_container_width=True):
                 dialogo_tarea(t)
+
+
+def _aviso_wip(t: dict, nuevo: str, veredicto: dict, key_prefix: str):
+    """El micro-momento del producto: sugerir terminar antes de empezar.
+
+    El sistema persuade, no bloquea — muestra el límite excedido, las tareas
+    más antiguas de la columna y deja mover de todas formas (registra la excepción).
+    """
+    st.warning(f'{veredicto.get("mensaje", "Límite WIP alcanzado.")} '
+               f'{veredicto.get("sugerencia", "")}')
+    antiguas = veredicto.get("tareas_mas_antiguas") or []
+    if antiguas:
+        st.caption("Podrías cerrar primero: " +
+                   " · ".join(a.get("descripcion", "") for a in antiguas))
+    if st.button("Mover de todas formas", key=f"{key_prefix}wipforce_{t['id']}"):
+        try:
+            get_client().patch_status(t["id"], nuevo, force=True)
+            st.toast(f"Estado: {nuevo} (límite WIP excedido)")
+            recargar()
+        except ApiError as e:
+            st.error(str(e))
 
 
 @st.dialog("Tarea", width="large")

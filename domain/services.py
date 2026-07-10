@@ -202,6 +202,83 @@ class FlowService:
         }
 
 
+class WipService:
+    """Límites WIP explícitos — la práctica central de Kanban que casi nadie implementa.
+
+    Opera sobre dicts de tareas y de configuración de columnas
+    ({estado, wip_limit, wip_limit_scope}), sin tocar la base de datos.
+    Cenit persuade, no bloquea: el veredicto alimenta avisos, nunca un candado.
+    """
+
+    def ocupacion(self, tareas: list[dict], columnas: list[dict]) -> dict[str, dict]:
+        """Ocupación de cada columna contra su límite: ok | al_limite | excedido | sin_limite."""
+        resultado: dict[str, dict] = {}
+        for col in columnas:
+            estado = col["estado"]
+            en_col = [t for t in tareas if t.get("estado") == estado]
+            por_persona: dict[str, int] = {}
+            for t in en_col:
+                p = t.get("responsable") or "Sin asignar"
+                por_persona[p] = por_persona.get(p, 0) + 1
+
+            limite = col.get("wip_limit")
+            scope = col.get("wip_limit_scope") or "board"
+            if limite is None:
+                status = "sin_limite"
+            else:
+                # Con scope 'person' manda la persona más cargada, no el total
+                medido = max(por_persona.values(), default=0) if scope == "person" else len(en_col)
+                status = "excedido" if medido > limite else ("al_limite" if medido == limite else "ok")
+
+            resultado[estado] = {
+                "ocupacion": len(en_col),
+                "wip_limit": limite,
+                "scope": scope,
+                "status": status,
+                "por_persona": por_persona,
+            }
+        return resultado
+
+    def evaluar_movimiento(
+        self, tareas: list[dict], columnas: list[dict],
+        estado_destino: str, responsable: Optional[str] = None,
+    ) -> dict:
+        """¿Meter una tarea más en `estado_destino` rompe su límite?
+
+        Devuelve el veredicto más el contexto del aviso: ocupación actual,
+        límite y las tareas más antiguas de la columna (terminar antes de empezar).
+        """
+        col = next((c for c in columnas if c["estado"] == estado_destino), None)
+        limite = col.get("wip_limit") if col else None
+        if limite is None:
+            return {"excedido": False, "wip_limit": None, "wip_actual": None,
+                    "scope": "board", "tareas_mas_antiguas": []}
+
+        en_col = [t for t in tareas if t.get("estado") == estado_destino]
+        scope = col.get("wip_limit_scope") or "board"
+        if scope == "person":
+            p = responsable or "Sin asignar"
+            actual = sum(1 for t in en_col if (t.get("responsable") or "Sin asignar") == p)
+        else:
+            actual = len(en_col)
+
+        excedido = actual + 1 > limite
+        mas_antiguas = sorted(
+            en_col, key=lambda t: str(t.get("fecha_inicio") or t.get("created_at") or ""),
+        )[:3] if excedido else []
+        return {
+            "excedido": excedido,
+            "wip_limit": limite,
+            "wip_actual": actual,
+            "scope": scope,
+            "tareas_mas_antiguas": [
+                {"id": t.get("id"), "descripcion": t.get("descripcion"),
+                 "responsable": t.get("responsable")}
+                for t in mas_antiguas
+            ],
+        }
+
+
 class FiltroService:
     def filtrar(
         self,

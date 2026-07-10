@@ -111,14 +111,52 @@ def delete_task(task_id: int, request: Request, db: Session = Depends(get_db)):
 @app.patch("/api/tasks/{task_id}/status")
 def patch_status(task_id: int, body: schemas.StatusPatch, request: Request, db: Session = Depends(get_db)):
     payload = verify_token(request)
-    task = crud.patch_task_status(db, task_id, body.estado, changed_by=payload.get("username"))
+    task = crud.get_task(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
+
+    # Límite WIP: Cenit persuade, no bloquea — 409 con contexto; force=true registra la excepción
+    if body.estado != task.estado and not body.force:
+        veredicto = crud.evaluar_wip_movimiento(db, body.estado, responsable=task.responsable)
+        if veredicto["excedido"]:
+            raise HTTPException(status_code=409, detail={
+                "mensaje": f'Límite WIP de «{body.estado}» alcanzado '
+                           f'({veredicto["wip_actual"]}/{veredicto["wip_limit"]}).',
+                "sugerencia": "Completa o pausa una tarea antes de iniciar otra, "
+                              "o mueve de todas formas para registrar la excepción.",
+                **veredicto,
+            })
+
+    task = crud.patch_task_status(db, task_id, body.estado, changed_by=payload.get("username"))
     return task
 
 @app.get("/api/tasks/{task_id}/transitions", response_model=List[schemas.TransitionOut])
 def task_transitions(task_id: int, db: Session = Depends(get_db)):
     return crud.get_transitions(db, task_id)
+
+# ── Kanban: límites WIP y políticas ───────────────────────────────────────────────────
+
+@app.get("/api/kanban/columns", response_model=List[schemas.KanbanColumnOut])
+def kanban_columns(db: Session = Depends(get_db)):
+    return crud.get_kanban_columns(db)
+
+@app.put("/api/kanban/columns/{estado}", response_model=schemas.KanbanColumnOut)
+def update_kanban_column(estado: str, data: schemas.KanbanColumnUpdate,
+                         request: Request, db: Session = Depends(get_db)):
+    payload = verify_token(request)
+    if payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Solo admins pueden editar los límites del tablero")
+    if data.wip_limit_scope and data.wip_limit_scope not in ("board", "person"):
+        raise HTTPException(status_code=400, detail="wip_limit_scope debe ser board o person")
+    col = crud.update_kanban_column(db, estado, data)
+    if not col:
+        raise HTTPException(status_code=404, detail="Columna no encontrada")
+    return col
+
+@app.get("/api/kanban/wip-status")
+def kanban_wip_status(db: Session = Depends(get_db)):
+    """Ocupación actual de cada columna contra su límite WIP."""
+    return crud.get_wip_status(db)
 
 # ── Analytics ─────────────────────────────────────────────────────────────────────────
 

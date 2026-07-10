@@ -121,7 +121,9 @@ class TestFlow:
             headers=auth(token),
         )
         task_id = res.json()["id"]
-        client.patch(f"/api/tasks/{task_id}/status", json={"estado": "En Proceso"}, headers=auth(token))
+        # force=True: el seed real ya excede el límite WIP de «En Proceso»
+        client.patch(f"/api/tasks/{task_id}/status",
+                     json={"estado": "En Proceso", "force": True}, headers=auth(token))
         client.patch(f"/api/tasks/{task_id}/status", json={"estado": "Completado"}, headers=auth(token))
 
         trans = client.get(f"/api/tasks/{task_id}/transitions").json()
@@ -148,6 +150,76 @@ class TestFlow:
         assert body["tareas"] > 0
         assert "lead_time_avg" in body
         assert "por_tarea" in body
+
+
+class TestWipLimits:
+    def test_columnas_por_defecto(self, client):
+        res = client.get("/api/kanban/columns")
+        assert res.status_code == 200
+        cols = {c["estado"]: c for c in res.json()}
+        assert cols["En Proceso"]["wip_limit"] == 10
+        assert cols["No Iniciado"]["wip_limit"] is None
+        assert cols["En Proceso"]["policy_text"]
+
+    def test_wip_status_reporta_ocupacion(self, client):
+        res = client.get("/api/kanban/wip-status")
+        assert res.status_code == 200
+        wip = res.json()["wip"]
+        assert wip["En Proceso"]["ocupacion"] >= 1
+        assert wip["En Proceso"]["status"] in ("ok", "al_limite", "excedido")
+        assert wip["Completado"]["status"] == "sin_limite"
+
+    def test_editar_limite_requiere_token(self, client):
+        res = client.put("/api/kanban/columns/En Proceso", json={"wip_limit": 5})
+        assert res.status_code == 401
+
+    def test_editar_limite_con_member_da_403(self, client):
+        tk = client.post("/api/auth/login",
+                         json={"username": "moshe", "password": "Moshe21"}).json()["token"]
+        res = client.put("/api/kanban/columns/En Proceso", json={"wip_limit": 5}, headers=auth(tk))
+        assert res.status_code == 403
+
+    def test_scope_invalido_da_400(self, client, token):
+        res = client.put("/api/kanban/columns/En Proceso",
+                         json={"wip_limit": 5, "wip_limit_scope": "galaxia"}, headers=auth(token))
+        assert res.status_code == 400
+
+    def test_mover_a_columna_llena_da_409_y_force_lo_permite(self, client, token):
+        # Bajar el límite a 1 garantiza el conflicto (el seed ya tiene tareas En Proceso)
+        res = client.put("/api/kanban/columns/En Proceso",
+                         json={"wip_limit": 1, "wip_limit_scope": "board"}, headers=auth(token))
+        assert res.status_code == 200
+
+        nueva = client.post("/api/tasks",
+                            json={"entidad": "Xertify", "descripcion": "Tarea WIP test",
+                                  "estado": "No Iniciado"}, headers=auth(token)).json()
+        res = client.patch(f'/api/tasks/{nueva["id"]}/status',
+                           json={"estado": "En Proceso"}, headers=auth(token))
+        assert res.status_code == 409
+        detalle = res.json()["detail"]
+        assert detalle["wip_limit"] == 1
+        assert detalle["excedido"] is True
+        assert detalle["tareas_mas_antiguas"]  # sugiere terminar antes de empezar
+
+        # Persuade, no bloquea: con force el movimiento procede y queda en el historial
+        res = client.patch(f'/api/tasks/{nueva["id"]}/status',
+                           json={"estado": "En Proceso", "force": True}, headers=auth(token))
+        assert res.status_code == 200
+        assert res.json()["estado"] == "En Proceso"
+        trans = client.get(f'/api/tasks/{nueva["id"]}/transitions').json()
+        assert [t["to_state"] for t in trans] == ["No Iniciado", "En Proceso"]
+
+        # Restaurar el límite por defecto para no contaminar otros tests
+        res = client.put("/api/kanban/columns/En Proceso",
+                         json={"wip_limit": 10, "wip_limit_scope": "board"}, headers=auth(token))
+        assert res.status_code == 200
+
+    def test_mover_dentro_de_la_misma_columna_no_choca_con_wip(self, client, token):
+        # Repetir el estado actual no debe disparar el 409 aunque la columna esté llena
+        tarea = client.get("/api/tasks", params={"status": "En Proceso"}).json()[0]
+        res = client.patch(f'/api/tasks/{tarea["id"]}/status',
+                           json={"estado": "En Proceso"}, headers=auth(token))
+        assert res.status_code == 200
 
 
 class TestOkr:
