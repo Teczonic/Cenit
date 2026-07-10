@@ -95,6 +95,10 @@ Guía paso a paso en [DEPLOY.md](DEPLOY.md). Resumen:
 - **Equipo** — carga por responsable; los admins crean usuarios.
 - **Importar CSV** — sube un export de Jira/Trello/Excel; Cenit detecta las columnas
   y crea las tareas, habilitando el diagnóstico inmediato en el Cockpit.
+- **Reporte semanal** — el cron de Vercel genera cada lunes un ejecutivo en markdown
+  (pulso, riesgos, bloqueos/zombis, vencimientos, recomendaciones por reglas), visible
+  en el Cockpit; los admins pueden regenerarlo a demanda. Con `CRON_SECRET` definido,
+  `/api/reports/weekly/run` exige el header del cron o JWT de admin.
 
 ## Motor de flujo
 

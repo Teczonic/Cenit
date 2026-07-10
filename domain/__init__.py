@@ -8,6 +8,7 @@ from .entities import RiskScore, Tarea, Usuario
 from .lean import LeanService
 from .metrics import MetricsEngine, evaluar_estado, tendencia
 from .okrs import OkrService
+from .reports import ReportService
 from .sprints import SprintService
 from .services import (
     AnalyticsService,
@@ -31,6 +32,7 @@ __all__ = [
     "LeanService",
     "MetricsEngine",
     "OkrService",
+    "ReportService",
     "RiesgoService",
     "SprintService",
     "WipService",

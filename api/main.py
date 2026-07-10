@@ -153,6 +153,33 @@ def patch_status(task_id: int, body: schemas.StatusPatch, request: Request, db: 
 def task_transitions(task_id: int, db: Session = Depends(get_db)):
     return crud.get_transitions(db, task_id)
 
+# ── Reporte semanal (target del cron de Vercel) ────────────────────────────────────────
+
+@app.api_route("/api/reports/weekly/run", methods=["GET", "POST"])
+def run_weekly_report(request: Request, db: Session = Depends(get_db)):
+    """Genera el reporte de la semana en curso. El cron de Vercel lo dispara los
+    lunes; con CRON_SECRET definido exige `Authorization: Bearer <secret>` (el
+    header que Vercel envía) o un JWT de admin. Sin secret (dev), queda abierto."""
+    secret = os.getenv("CRON_SECRET")
+    if secret:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header != f"Bearer {secret}":
+            payload = verify_token(request)  # 401 si tampoco hay JWT válido
+            if payload.get("role") != "admin":
+                raise HTTPException(status_code=403, detail="Solo admins o el cron pueden generar el reporte")
+    return crud.generate_weekly_report(db)
+
+@app.get("/api/reports/latest")
+def latest_report(db: Session = Depends(get_db)):
+    r = crud.get_latest_report(db)
+    if not r:
+        raise HTTPException(status_code=404, detail="Aún no hay reportes generados")
+    return r
+
+@app.get("/api/reports")
+def reports_index(db: Session = Depends(get_db)):
+    return crud.list_reports(db)
+
 # ── Kanban: límites WIP y políticas ───────────────────────────────────────────────────
 
 @app.get("/api/kanban/columns", response_model=List[schemas.KanbanColumnOut])

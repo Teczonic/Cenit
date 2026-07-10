@@ -154,6 +154,19 @@ class KanbanColumn(Base):
     updated_at      = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class WeeklyReport(Base):
+    """Reporte semanal ejecutivo generado por el cron (o a demanda).
+    Uno por semana (upsert sobre semana_inicio): el historial de reportes
+    es la memoria de cómo evolucionó el equipo."""
+    __tablename__ = "weekly_reports"
+    id            = Column(Integer, primary_key=True, index=True)
+    semana_inicio = Column(Date, nullable=False, unique=True)
+    semana_fin    = Column(Date, nullable=False)
+    contenido_md  = Column(Text, nullable=False)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at    = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 class WasteEvent(Base):
     """Bloqueo/desperdicio reportado con taxonomía Lean (7 mudas del software).
     resolved_at NULL = bloqueo activo. Cenit también detecta desperdicio

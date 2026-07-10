@@ -117,3 +117,25 @@ def render():
         for i, t in enumerate(en_riesgo[:6]):
             with cols[i % 2]:
                 tarjeta_tarea(t, key_prefix="cockpit_")
+
+    # ── Reporte semanal ──────────────────────────────────────────────────
+    st.divider()
+    with st.expander("📰 Reporte semanal ejecutivo"):
+        try:
+            reporte = get_client().latest_report()
+        except ApiError:
+            reporte = None
+        if reporte:
+            st.caption(f'Semana {reporte["semana_inicio"]} → {reporte["semana_fin"]} '
+                       "(el cron lo regenera cada lunes)")
+            st.markdown(reporte["contenido_md"])
+        else:
+            st.caption("Aún no hay reportes. El cron de Vercel genera uno cada lunes, "
+                       "o genera el primero ahora:")
+        if st.session_state.get("user", {}).get("role") == "admin":
+            if st.button("Generar ahora"):
+                try:
+                    get_client().run_weekly_report()
+                    st.rerun()
+                except ApiError as e:
+                    st.error(str(e))

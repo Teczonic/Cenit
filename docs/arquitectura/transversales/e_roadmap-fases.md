@@ -35,9 +35,16 @@ El roadmap parte de un hecho que las secciones teóricas no tenían: **el MVP ya
       sin módulo nuevo en el menú) con pareto de desperdicio (reportado en `waste_events`
       + detección automática de multitasking, trabajo parcial y retrabajo), bloqueos
       con resolución, tareas zombi y Ley de Little (WIP/throughput vs lead time real).
-- [ ] Reporte semanal automático (estado ejecutivo + riesgos + próximos bloqueos) vía Vercel Cron.
+- [x] Reporte semanal automático (`ReportService` + `weekly_reports`, upsert por semana):
+      pulso ejecutivo, riesgos, bloqueos/zombis, vencimientos y recomendaciones por
+      reglas. Cron de Vercel los lunes 12:00 UTC (`vercel.json`), protegido con
+      `CRON_SECRET`, visible en el Cockpit y regenerable a demanda por admins.
 
 **Criterio de aceptación:** 3-5 equipos vuelven **cada semana sin que los empujes** y al menos uno configura un KPI con meta propia. **Duración:** 3-4 sprints. **Riesgo:** meter demasiadas vistas y matar el onboarding — regla del panel: ningún módulo entra al menú hasta que Kanban+KPIs demuestren retención.
+
+> **Estado (2026-07-09): todo el código de V2 está construido y testeado.** Lo que
+> resta de V2 no es código sino señal: pilotos activos usando la app semana a semana.
+> V3 (DORA, OKR check-ins, IA) espera su compuerta: clientes pagando o cartas de intención.
 
 ### V3 — Diferenciación y cobro (con clientes pagando o cartas de intención)
 
@@ -64,9 +71,9 @@ El roadmap parte de un hecho que las secciones teóricas no tenían: **el MVP ya
 
 | Fase | Metodologías | Señal que la habilita | Estado |
 |---|---|---|---|
-| MVP | Kanban, Eisenhower, Riesgos, Analytics | — (arranque) | ✅ casi completo |
-| V2 | KPIs, Scrum, Lean | 3+ pilotos, 8 sem. de datos | ▶️ OKRs adelantado |
-| V3 | DORA, OKRs completo, IA | Clientes pagando | ⏳ |
-| V4 | Waterfall/PMBOK, XP, SPACE, WSJF | Demanda con contrato | ⏳ |
+| MVP | Kanban (con WIP), Eisenhower, Riesgos, Analytics | — (arranque) | ✅ código completo (falta piloto en Streamlit Cloud) |
+| V2 | KPIs, Scrum ligero, Lean, reporte semanal | 3+ pilotos, 8 sem. de datos | ✅ código completo; esperando señal de pilotos |
+| V3 | DORA, OKRs completo, IA | Clientes pagando | ⏳ compuerta cerrada |
+| V4 | Waterfall/PMBOK, XP, SPACE, WSJF | Demanda con contrato | ⏳ compuerta cerrada |
 
 La disciplina del roadmap es negativa, no positiva: no se trata de qué construir, sino de **qué no construir todavía**. Cada fase tiene una compuerta de datos o de dinero; saltarla es la definición de sobre-ingeniería para un equipo de 1-2 personas.

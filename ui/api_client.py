@@ -109,6 +109,14 @@ class CenitClient:
     def wip_status(self) -> dict:
         return self._request("GET", "/api/kanban/wip-status")
 
+    # ── Reportes ─────────────────────────────────────────────────────
+
+    def latest_report(self) -> dict:
+        return self._request("GET", "/api/reports/latest")
+
+    def run_weekly_report(self) -> dict:
+        return self._request("POST", "/api/reports/weekly/run")
+
     # ── Sprints ──────────────────────────────────────────────────────
 
     def sprints(self, entidad: str | None = None, estado: str | None = None) -> list[dict]:

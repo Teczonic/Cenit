@@ -5,7 +5,8 @@ from typing import Optional
 from . import models, schemas
 from .auth import hash_password
 from domain.lean import LeanService
-from domain.services import FlowService, WipService
+from domain.reports import ReportService
+from domain.services import FlowService, RiesgoService, WipService
 from domain.sprints import SprintService
 import random
 
@@ -308,6 +309,70 @@ def get_lean_summary(db: Session):
     flow = FlowService().resumen(transiciones, ahora)
     return LeanService().resumen(tareas, transiciones, waste, ahora,
                                  flow_efficiency_avg=flow.get("flow_efficiency_avg"))
+
+
+# ── Reporte semanal ejecutivo ────────────────────────────────────────────────
+
+def generate_weekly_report(db: Session):
+    """Genera (o regenera) el reporte de la semana en curso y lo persiste.
+    Target del cron de Vercel; también invocable a demanda desde el cockpit."""
+    hoy = datetime.utcnow().date()
+    semana_inicio = hoy - timedelta(days=hoy.weekday())   # lunes
+    semana_fin = semana_inicio + timedelta(days=6)
+
+    tareas_dicts = [{
+        "id": t.id, "descripcion": t.descripcion, "estado": t.estado,
+        "responsable": t.responsable, "fecha_fin": t.fecha_fin,
+        "risk_score": t.risk_score,
+    } for t in db.query(models.Task).all()]
+
+    inicio_dt = datetime.combine(semana_inicio, datetime.min.time())
+    completadas_semana = [
+        {"id": t.id, "descripcion": t.descripcion}
+        for t in db.query(models.Task).filter(
+            models.Task.fecha_completado.isnot(None)).all()
+        if (t.fecha_completado.replace(tzinfo=None) if t.fecha_completado.tzinfo
+            else t.fecha_completado) >= inicio_dt
+    ]
+    limite = datetime.utcnow() + timedelta(days=7)
+    vencen_pronto = sorted(
+        (t for t in tareas_dicts
+         if t["estado"] != "Completado" and t["fecha_fin"] is not None
+         and (t["fecha_fin"].replace(tzinfo=None) if t["fecha_fin"].tzinfo
+              else t["fecha_fin"]) <= limite),
+        key=lambda t: str(t["fecha_fin"]))
+
+    reporte = ReportService().generar(
+        semana_inicio=semana_inicio, semana_fin=semana_fin,
+        summary=get_summary(db), flow=get_flow_metrics(db), lean=get_lean_summary(db),
+        riesgos=RiesgoService().ordenar_por_riesgo(tareas_dicts),
+        completadas_semana=completadas_semana, vencen_pronto=vencen_pronto,
+    )
+    md = ReportService().a_markdown(reporte)
+
+    existente = (db.query(models.WeeklyReport)
+                   .filter(models.WeeklyReport.semana_inicio == semana_inicio).first())
+    if existente:
+        existente.contenido_md = md
+    else:
+        db.add(models.WeeklyReport(semana_inicio=semana_inicio,
+                                   semana_fin=semana_fin, contenido_md=md))
+    db.commit()
+    return {"semana_inicio": semana_inicio, "semana_fin": semana_fin,
+            "contenido_md": md, "reporte": reporte}
+
+def get_latest_report(db: Session):
+    r = (db.query(models.WeeklyReport)
+           .order_by(models.WeeklyReport.semana_inicio.desc()).first())
+    if not r:
+        return None
+    return {"id": r.id, "semana_inicio": r.semana_inicio, "semana_fin": r.semana_fin,
+            "contenido_md": r.contenido_md, "created_at": r.created_at}
+
+def list_reports(db: Session):
+    return [{"id": r.id, "semana_inicio": r.semana_inicio, "semana_fin": r.semana_fin}
+            for r in db.query(models.WeeklyReport)
+                       .order_by(models.WeeklyReport.semana_inicio.desc()).all()]
 
 
 # ── Sprints ligeros (Linear Cycles) ──────────────────────────────────────────

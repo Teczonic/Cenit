@@ -222,6 +222,41 @@ class TestWipLimits:
         assert res.status_code == 200
 
 
+class TestReports:
+    def test_sin_reportes_da_404(self, client):
+        assert client.get("/api/reports/latest").status_code == 404
+
+    def test_generar_y_leer_reporte(self, client):
+        # Sin CRON_SECRET definido el endpoint queda abierto (modo dev/cron local)
+        res = client.post("/api/reports/weekly/run")
+        assert res.status_code == 200
+        body = res.json()
+        assert "# 🏔️ Cenit — Reporte semanal" in body["contenido_md"]
+        assert body["reporte"]["pulso"]["abiertas"] > 0
+        # El seed tiene zombis y multitasking → debe recomendar algo
+        assert len(body["reporte"]["recomendaciones"]) > 0
+
+        latest = client.get("/api/reports/latest").json()
+        assert latest["contenido_md"] == body["contenido_md"]
+
+    def test_regenerar_misma_semana_no_duplica(self, client):
+        client.post("/api/reports/weekly/run")
+        client.post("/api/reports/weekly/run")
+        assert len(client.get("/api/reports").json()) == 1
+
+    def test_con_cron_secret_exige_header(self, client, token, monkeypatch):
+        monkeypatch.setenv("CRON_SECRET", "s3creto")
+        # Sin header ni JWT → 401
+        assert client.post("/api/reports/weekly/run").status_code == 401
+        # Con el header del cron → 200
+        res = client.post("/api/reports/weekly/run",
+                          headers={"Authorization": "Bearer s3creto"})
+        assert res.status_code == 200
+        # Con JWT de admin también funciona
+        res = client.post("/api/reports/weekly/run", headers=auth(token))
+        assert res.status_code == 200
+
+
 class TestLean:
     def test_resumen_lean_estructura(self, client):
         res = client.get("/api/analytics/lean")
